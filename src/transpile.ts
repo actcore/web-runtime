@@ -56,16 +56,21 @@ export async function transpileToBlobUrl(
   // when dist/ is served from a different origin than preview2-shim).
   const wasiHttpShimUrl = options.wasiHttpShimUrl
     ?? new URL('./shims/wasi-http.js', import.meta.url).href;
+  // host-browser ships its own wasi:sockets shim: preview2-shim's browser build
+  // omits the resource-class constructors any wasi:http-importing component
+  // needs present at instantiation. Route wasi:sockets here, not at shimBase.
+  const wasiSocketsShimUrl = options.wasiSocketsShimUrl
+    ?? new URL('./shims/sockets.js', import.meta.url).href;
   const useCache = options.cache !== false;
 
-  const generateOptions = buildGenerateOptions(name, shimBase, wasiHttpShimUrl);
+  const generateOptions = buildGenerateOptions(name, shimBase, wasiHttpShimUrl, wasiSocketsShimUrl);
 
   // 1. Cache lookup. The key spans HOST_VERSION + the SHA-256 of `bytes` + the
   //    output-affecting options, so a hit is byte-for-byte the right transpile.
   let cacheKey: string | null = null;
   if (useCache) {
     try {
-      cacheKey = await deriveTranspileCacheKey({ bytes, name, shimBase, wasiHttpShimUrl });
+      cacheKey = await deriveTranspileCacheKey({ bytes, name, shimBase, wasiHttpShimUrl, wasiSocketsShimUrl });
       const cached = await getCachedFiles(cacheKey);
       if (cached) {
         console.debug('[@actcore/host] transpile cache hit — skipping generate()');
@@ -103,6 +108,7 @@ function buildGenerateOptions(
   name: string,
   shimBase: string,
   wasiHttpShimUrl: string,
+  wasiSocketsShimUrl: string,
 ): GenerateOptions {
   return {
     name,
@@ -114,7 +120,7 @@ function buildGenerateOptions(
       ['wasi:http/*', wasiHttpShimUrl + '#*'],
       ['wasi:io/*', shimBase + 'io.js#*'],
       ['wasi:random/*', shimBase + 'random.js#*'],
-      ['wasi:sockets/*', shimBase + 'sockets.js#*'],
+      ['wasi:sockets/*', wasiSocketsShimUrl + '#*'],
     ],
   };
 }

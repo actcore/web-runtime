@@ -17,9 +17,21 @@ export interface ToolProvider {
   callTool(name: string, args: Cbor, metadata: Metadata): Promise<ToolResult>;
 }
 
+/**
+ * Typed mirror of `act:sessions/session-provider@0.2.0` as exposed by
+ * jco-transpiled modules (present only on session-provider components).
+ */
+export interface SessionProvider {
+  getOpenSessionArgsSchema(metadata: Metadata): Promise<string>;
+  openSession(args: Metadata, metadata: Metadata): Promise<{ id: string; metadata: Metadata }>;
+  closeSession(sessionId: string): void;
+}
+
 export interface ComponentInstance {
   /** `act:tools/tool-provider@0.2.0` if the component exports it. */
   toolProvider: ToolProvider;
+  /** `act:sessions/session-provider@0.2.0` if the component exports it. */
+  sessionProvider?: SessionProvider;
 }
 
 export interface RunComponentOptions {
@@ -42,6 +54,16 @@ export interface RunComponentOptions {
    * wasi:http p3 shim served from another.
    */
   wasiHttpShimUrl?: string;
+  /**
+   * Optional absolute URL of `dist/shims/sockets.js` from `@actcore/host`.
+   * Defaults to the bundled shim resolved relative to host-api's module URL.
+   * host-browser ships its own wasi:sockets shim because preview2-shim's
+   * browser build omits the resource-class constructors (ResolveAddressStream,
+   * Network, TcpSocket, UdpSocket, …) that any wasi:http-importing component
+   * needs present at instantiation. Override when serving shims from another
+   * origin (same reason as {@link wasiHttpShimUrl}).
+   */
+  wasiSocketsShimUrl?: string;
   /**
    * Persist + reuse the jco transpile output in IndexedDB, keyed by
    * `@actcore/host`'s version and the SHA-256 of the component bytes. Defaults
@@ -82,6 +104,7 @@ export async function runComponent(
   // Dynamic import from blob: URL is supported in all browsers with ESM modules.
   const mod = (await import(/* @vite-ignore */ entryBlobUrl)) as {
     toolProvider?: ToolProvider;
+    sessionProvider?: SessionProvider;
   };
 
   if (!mod.toolProvider) {
@@ -90,6 +113,8 @@ export async function runComponent(
     );
   }
 
-  return { toolProvider: mod.toolProvider };
+  // sessionProvider is present only on session-provider components; pass it
+  // through so callers can open sessions (stateful components need it).
+  return { toolProvider: mod.toolProvider, sessionProvider: mod.sessionProvider };
 }
 
