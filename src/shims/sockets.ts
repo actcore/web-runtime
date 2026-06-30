@@ -15,7 +15,27 @@
  * we run in the tab; the constructors only need to EXIST so instantiation
  * succeeds. host-browser routes `wasi:sockets/*` here (see transpile.ts) instead
  * of at the preview2-shim base.
+ *
+ * DENY, DON'T CRASH: the three resource-creation entry points below —
+ * `resolveAddresses` (DNS), `createTcpSocket`, `createUdpSocket` — are the only
+ * ways guest code can ever obtain a live socket/lookup resource; every other
+ * method in this file is unreachable unless one of those three succeeds. Their
+ * WIT signatures return `result<_, error-code>`, and jco's generated glue wraps
+ * each call in `try { ... } catch (e) { ret = { tag: 'err', val:
+ * getErrorPayload(e) } }` — but `getErrorPayload` only treats `e` as the error
+ * payload if `e` is NOT a plain `Error` (a thrown `Error` gets RE-THROWN
+ * uncaught instead of becoming a clean `result::err`, verified by reading the
+ * transpiled glue). So denial must throw the raw `error-code` string value
+ * (e.g. `'access-denied'`), never `new Error(...)` — a plain Error here
+ * doesn't deny the call, it corrupts the CPython/JSPI interpreter state
+ * (`Fatal Python error: ... the GIL is released`), which is worse than useless
+ * for a "sealed sandbox" story. Everything else in this file stays a bare
+ * no-op stub: unreachable code, so its shape doesn't matter.
  */
+
+function denyAccess(): never {
+  throw 'access-denied';
+}
 
 export const instanceNetwork = {
   instanceNetwork() {},
@@ -25,7 +45,7 @@ export const ipNameLookup = {
   ResolveAddressStream: class ResolveAddressStream {},
   dropResolveAddressStream() {},
   subscribe() {},
-  resolveAddresses() {},
+  resolveAddresses: denyAccess,
   resolveNextAddress() {},
   nonBlocking() {},
   setNonBlocking() {},
@@ -37,7 +57,7 @@ export const network = {
 };
 
 export const tcpCreateSocket = {
-  createTcpSocket() {},
+  createTcpSocket: denyAccess,
 };
 
 export const tcp = {
@@ -68,7 +88,7 @@ export const tcp = {
 };
 
 export const udpCreateSocket = {
-  createUdpSocket() {},
+  createUdpSocket: denyAccess,
 };
 
 export const udp = {
