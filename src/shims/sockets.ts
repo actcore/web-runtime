@@ -31,14 +31,29 @@
  * (`Fatal Python error: ... the GIL is released`), which is worse than useless
  * for a "sealed sandbox" story. Everything else in this file stays a bare
  * no-op stub: unreachable code, so its shape doesn't matter.
+ *
+ * `instance-network()` is the one exception to "deny at the entry point": its
+ * WIT signature is `func() -> network` — no `result<>`, so it has NO error
+ * channel at all (getting the ambient network capability TOKEN is defined to
+ * never fail; the denial belongs at the point that token is actually used).
+ * It must return a real `Network` instance — returning `undefined` fails the
+ * caller's `instanceof Network` check with an uncaught "Resource error: Not a
+ * valid Network resource", which (same as above) never reaches Python as a
+ * clean exception. `Network` is declared once here so `instanceNetwork()` and
+ * `network.Network` share the identical class the generated glue checks
+ * `instanceof` against.
  */
 
 function denyAccess(): never {
   throw 'access-denied';
 }
 
+class Network {}
+
 export const instanceNetwork = {
-  instanceNetwork() {},
+  instanceNetwork() {
+    return new Network();
+  },
 };
 
 export const ipNameLookup = {
@@ -52,7 +67,7 @@ export const ipNameLookup = {
 };
 
 export const network = {
-  Network: class Network {},
+  Network,
   dropNetwork() {},
 };
 
