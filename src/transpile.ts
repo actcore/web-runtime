@@ -113,6 +113,9 @@ function buildGenerateOptions(
   return {
     name,
     asyncMode: { tag: 'jspi', val: { imports: [], exports: [] } },
+    // No .d.ts is ever consumed at runtime (browser or the Node debug path in
+    // transpile.ts's header comment) — skipping its generation is a pure win.
+    noTypescript: true,
     map: [
       ['wasi:cli/*', shimBase + 'cli.js#*'],
       ['wasi:clocks/*', shimBase + 'clocks.js#*'],
