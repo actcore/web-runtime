@@ -50,27 +50,6 @@ export function applyPatches(src: string): string {
     }
   }
 
-  // PATCH: jco's `_lowerFlatOption` lowering treats only JS `null` as the
-  // option's `none` case (`if (v === null)`), yet jco's own generated types
-  // model `option<T>` none as `T | undefined`. When the value is `undefined`
-  // (e.g. wasi:http p3's empty trailers future `Ok(None)` = `{tag:'ok',
-  // val: undefined}`), jco mis-lowers it as `some(undefined)` and then throws
-  // `missing resource` trying to lower a non-existent `own<resource>` — which
-  // kills the async task, so a streaming tool-result's `.next()` never
-  // resolves (presents as an indefinite hang at body completion). Widen the
-  // none check to accept `undefined`. One inlined `_lowerFlatOption` helper is
-  // emitted per module, so there is exactly one occurrence. Remove once fixed
-  // upstream (bytecodealliance/jco — see ACT-153).
-  const optNoneAnchor = 'if (v === null) {';
-  if (out.includes(optNoneAnchor)) {
-    out = out.replace(optNoneAnchor, 'if (v === null || v === undefined) {');
-  } else {
-    console.warn(
-      '[@actcore/host] patches: _lowerFlatOption none-check anchor not found — ' +
-        'jco may have changed it; option<own<resource>> none may crash (ACT-153)',
-    );
-  }
-
   return out;
 }
 
