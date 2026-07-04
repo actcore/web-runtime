@@ -171,10 +171,12 @@ test('client.send: GET maps method/url, returns 200 with body', async () => {
 test('Response.consumeBody: returns ReadableStream<number> of body bytes', async () => {
   // Task 7 contract: jco's `_trampoline54` calls `Response.consumeBody(rsc,
   // futureResult)` and treats `tuple4_0` as one of {asyncIterable, iterable,
-  // ReadableStream}. Each value yielded must be a single u8 (number), because
-  // the stream lowering's `_lowerFlatU8` writes one byte per value via
-  // setUint32. This test exercises the same path: send → consumeBody → drain
-  // reader → assert byte-by-byte equality with the served body.
+  // ReadableStream}. consumeBody yields the whole body as a single Uint8Array
+  // chunk — jco's `appendReadValue` batches array-like values and `drainInto`
+  // re-expands them to individual u8s for `_lowerFlatU8` (which writes one byte
+  // per value via setUint32). The per-byte enqueue this replaced was ~95 B/s;
+  // see ACT-153. This test exercises the path: send → consumeBody → drain
+  // reader → assert the flattened bytes equal the served body.
   const mockAgent = new MockAgent();
   mockAgent.disableNetConnect();
   setGlobalDispatcher(mockAgent);
@@ -200,14 +202,15 @@ test('Response.consumeBody: returns ReadableStream<number> of body bytes', async
 
   const reader = stream.getReader();
   const collected = [];
-  // Drain one value per read() call — each is a single byte (number), per
-  // the WIT stream<u8> ABI as lowered by jco.
+  // consumeBody yields the whole body as one Uint8Array chunk; jco expands it
+  // to individual u8s downstream. Accept either shape (number or array-like)
+  // and flatten to bytes before comparing. See ACT-153.
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    assert.equal(typeof value, 'number', 'each chunk must be a u8 number');
-    collected.push(value);
+    if (typeof value === 'number') collected.push(value);
+    else for (const b of value) collected.push(b);
   }
   assert.deepEqual(collected, [0, 1, 2, 254, 255]);
 

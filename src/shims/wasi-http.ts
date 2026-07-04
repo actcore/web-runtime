@@ -289,10 +289,12 @@ export class Request {
 // (= `globalThis.ReadableStream`). The chosen branch becomes `readFn5` whose
 // `.next()`/`.read()` results feed `hostWriteEnd.write(values)` — and the
 // inner `lowerFn` is `_lowerFlatU8`, which writes ONE byte per value via
-// `setUint32(ptr, ctx.vals[0], true)`. That means each item yielded must be
-// a `number` (u8), NOT a `Uint8Array`. The body chunk from a native fetch
-// (`ReadableStream<Uint8Array>`) is therefore wrong shape; we have to expand
-// it to one byte per chunk. `tuple4_1` is written verbatim to memory as an
+// `setUint32(ptr, ctx.vals[0], true)`. NOTE: this does NOT require the reader
+// to yield one `number` per read — jco's `PendingValueQueue.appendReadValue`
+// batches array-like values and `drainInto` re-expands them to individual u8s
+// before `_lowerFlatU8`. So `consumeBody` yields the whole `Uint8Array` in one
+// chunk (see ACT-153; the old per-byte enqueue was ~95 B/s). `tuple4_1` is
+// written verbatim to memory as an
 // Int32 — for our purposes a resolved Promise<{tag:'ok'}> is fine, jco's
 // trailers wiring is invoked separately. This is **Branch B** of the Task 7
 // plan: synchronous static method returning [stream, futureValue].
@@ -359,26 +361,27 @@ export class Response {
     // the stream's reader (see the block comment above `class Response`).
     if (this_.body) return [this_.body, this_.trailers];
     const bytes = this_._bufferedBody ?? new Uint8Array(0);
-    // Per-byte enqueue matches wasip3 `stream<u8>` (each value is one u8).
-    // Default CountQueuingStrategy.highWaterMark=1 stalls the stream after
-    // one byte; set it to the body length so jco's batch-read drains all
-    // bytes in a single `count`-sized pull. Use `pull` for lazy filling.
-    let idx = 0;
-    const body = new ReadableStream<number>(
-      {
-        pull(controller) {
-          while (
-            idx < bytes.length &&
-            controller.desiredSize !== null &&
-            controller.desiredSize > 0
-          ) {
-            controller.enqueue(bytes[idx++]);
-          }
-          if (idx >= bytes.length) controller.close();
-        },
+    // Enqueue the already-buffered body as ONE chunk. An earlier revision
+    // enqueued one byte per chunk on the belief that jco's `_lowerFlatU8`
+    // requires each stream value to be a single `number` — that is wrong. jco
+    // pulls values via the reader, and `PendingValueQueue.appendReadValue`
+    // batches array-like values (Uint8Array included) while `drainInto`
+    // re-expands them to individual u8s for `_lowerFlatU8` on the write side.
+    // The per-byte path cost a full async-task round-trip PER BYTE (~95 B/s; a
+    // 43 KB body took minutes / effectively hung). Whole-buffer enqueue drains
+    // the same body in <100 ms, byte-for-byte identical (verified). See ACT-153.
+    // The stream is nominally `ReadableStream<number>` per gen-types; the
+    // Uint8Array cast is intentional — jco expands it per-u8 (see above).
+    let sent = false;
+    const body = new ReadableStream<number>({
+      pull(controller) {
+        if (!sent) {
+          sent = true;
+          if (bytes.length > 0) controller.enqueue(bytes as unknown as number);
+        }
+        controller.close();
       },
-      { highWaterMark: Math.max(bytes.length, 1) },
-    );
+    });
     return [body, this_.trailers];
   }
 }
