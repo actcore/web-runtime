@@ -49,14 +49,14 @@ export interface RunComponentOptions {
    */
   shimBase: string;
   /**
-   * Optional absolute URL of `dist/shims/wasi-http.js` from `@actcore/host`.
+   * Optional absolute URL of `dist/shims/wasi-http.js` from `@actcore/web-runtime`.
    * Defaults to the bundled shim resolved relative to host-api's module URL.
-   * Override when `@actcore/host` is loaded from one origin and you want the
+   * Override when `@actcore/web-runtime` is loaded from one origin and you want the
    * wasi:http p3 shim served from another.
    */
   wasiHttpShimUrl?: string;
   /**
-   * Optional absolute URL of `dist/shims/sockets.js` from `@actcore/host`.
+   * Optional absolute URL of `dist/shims/sockets.js` from `@actcore/web-runtime`.
    * Defaults to the bundled shim resolved relative to host-api's module URL.
    * host-browser ships its own wasi:sockets shim because preview2-shim's
    * browser build omits the resource-class constructors (ResolveAddressStream,
@@ -67,7 +67,7 @@ export interface RunComponentOptions {
   wasiSocketsShimUrl?: string;
   /**
    * Persist + reuse the jco transpile output in IndexedDB, keyed by
-   * `@actcore/host`'s version and the SHA-256 of the component bytes. Defaults
+   * `@actcore/web-runtime`'s version and the SHA-256 of the component bytes. Defaults
    * to `true`. Set `false` to always transpile fresh (e.g. when debugging the
    * transpiler). No effect where IndexedDB / `crypto.subtle` is unavailable —
    * the cache silently disables itself there. See {@link clearTranspileCache}.
@@ -92,7 +92,7 @@ export async function runComponent(
 ): Promise<ComponentInstance> {
   if (typeof (WebAssembly as unknown as { promising?: unknown }).promising !== 'function') {
     throw new Error(
-      '@actcore/host requires JSPI (WebAssembly.promising). Use Chrome 137+ ' +
+      '@actcore/web-runtime requires JSPI (WebAssembly.promising). Use Chrome 137+ ' +
         '(stable), Firefox Nightly 152+, or Safari Technology Preview 243+. ' +
         'Per Interop 2026 commitment, stable Firefox/Safari ship JSPI in 2026.',
     );
@@ -120,7 +120,7 @@ export async function runComponent(
   }
   measurePhase('actcore:instantiate', tInstantiate, { component: options.name ?? 'component' });
   console.debug(
-    `[@actcore/host] instantiated on main thread in ${fmtDuration(performance.now() - tInstantiate)}`,
+    `[@actcore/web-runtime] instantiated on main thread in ${fmtDuration(performance.now() - tInstantiate)}`,
   );
 
   if (!mod.toolProvider) {

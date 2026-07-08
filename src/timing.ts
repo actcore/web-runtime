@@ -20,7 +20,7 @@ export function fmtDuration(ms: number): string {
  * cloneable); the caller's `console.debug` still carries the duration.
  *
  * `detail.devtools` is Chrome's Performance-panel extensibility API: it groups
- * these into a labeled "@actcore/host" track. Other engines ignore it.
+ * these into a labeled "@actcore/web-runtime" track. Other engines ignore it.
  */
 export function measurePhase(
   name: string,
@@ -40,7 +40,7 @@ export function measurePhase(
         ...numbers,
         devtools: {
           dataType: 'track-entry',
-          track: '@actcore/host',
+          track: '@actcore/web-runtime',
           color: 'primary',
           properties,
           tooltipText: name,

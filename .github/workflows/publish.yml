@@ -1,0 +1,56 @@
+name: Publish to npm
+
+# Publishes @actcore/web-runtime to npmjs.com on a version tag (e.g. v0.1.0).
+#
+# Auth uses npm Trusted Publishing (OIDC) — no long-lived NPM_TOKEN secret.
+# One-time setup on npmjs.com: on the @actcore/web-runtime package settings (or the
+# @actcore org, pre-creating the package), add a Trusted Publisher pointing at
+#   repository: actcore/web-runtime
+#   workflow:   .github/workflows/publish.yml
+# Provenance is attested automatically (id-token: write + publishConfig.provenance).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing (OIDC) + provenance attestation
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing (OIDC) requires npm >= 11.5.1.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      # wit/deps is gitignored and fetched via wkg (pinned by wkg.lock);
+      # gen-types needs it present before tsc.
+      - name: Install wkg
+        run: |
+          curl -fsSL https://github.com/bytecodealliance/wasm-pkg-tools/releases/download/v0.15.1/wkg-x86_64-unknown-linux-gnu -o "$RUNNER_TEMP/wkg"
+          chmod +x "$RUNNER_TEMP/wkg"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Build and test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # wkg pulls WIT from ghcr.io
+        run: |
+          npm ci
+          npm run sync-wit
+          npm run build
+          npm test
+
+      # publishConfig in package.json sets access=public + provenance=true.
+      - name: Publish
+        run: npm publish

@@ -3,7 +3,7 @@
 //
 // HOST_VERSION is part of the transpile-cache key (see src/cache.ts): bumping
 // the package version invalidates every cached transpile output, which is what
-// we want — a new @actcore/host release may carry new transpiler patches or a
+// we want — a new @actcore/web-runtime release may carry new transpiler patches or a
 // new bundled jco/bindgen, so previously-cached artifacts must not be reused.
 //
 // Wired into `npm run build` so the constant can never drift from package.json.

@@ -77,7 +77,7 @@ export async function transpileToBlobUrl(
       const cached = await getCachedFiles(cacheKey);
       if (cached) {
         measurePhase('actcore:transpile-cache-hit', t0, { path: 'cache', component: name });
-        console.debug(`[@actcore/host] transpile cache hit in ${fmtDuration(performance.now() - t0)} — skipping generate()`);
+        console.debug(`[@actcore/web-runtime] transpile cache hit in ${fmtDuration(performance.now() - t0)} — skipping generate()`);
         return buildBlobModuleGraph(cached, name, shimBase);
       }
     } catch {
@@ -152,7 +152,7 @@ async function generateFiles(
     const overheadMs = Math.max(0, totalMs - initMs - generateMs);
     measurePhase('actcore:transpile', t0, { path: 'web worker', component: options.name }, { initMs, generateMs, overheadMs });
     console.debug(
-      `[@actcore/host] transpiled in Web Worker in ${fmtDuration(totalMs)} — ` +
+      `[@actcore/web-runtime] transpiled in Web Worker in ${fmtDuration(totalMs)} — ` +
         `$init ${fmtDuration(initMs)}, generate ${fmtDuration(generateMs)}, ` +
         `worker+messaging ${fmtDuration(overheadMs)} (main thread free)`,
     );
@@ -160,7 +160,7 @@ async function generateFiles(
   }
   const files = await generateOnMainThread(bytes, options);
   measurePhase('actcore:transpile', t0, { path: 'main thread', component: options.name });
-  console.debug(`[@actcore/host] transpiled on main thread in ${fmtDuration(performance.now() - t0)} (worker unavailable)`);
+  console.debug(`[@actcore/web-runtime] transpiled on main thread in ${fmtDuration(performance.now() - t0)} (worker unavailable)`);
   return files;
 }
 
@@ -207,7 +207,7 @@ function tryGenerateInWorker(
         // The worker reached `generate()` but it (or the bindgen) failed. Recover
         // on the main thread, which carries the streaming MIME fallback and is
         // the proven path; if the component is genuinely bad it re-throws there.
-        console.debug('[@actcore/host] worker transpile failed, retrying on main thread:', msg?.error);
+        console.debug('[@actcore/web-runtime] worker transpile failed, retrying on main thread:', msg?.error);
         finish(() => resolve(null));
       }
     };
@@ -303,7 +303,7 @@ async function buildBlobModuleGraph(
   // Final sanity check.
   const stragglers = entrySrc.match(/['"`][^'"`]*\.core\.wasm['"`]/g);
   if (stragglers) {
-    console.warn('[@actcore/host] unmatched .core.wasm references:', stragglers);
+    console.warn('[@actcore/web-runtime] unmatched .core.wasm references:', stragglers);
   }
   for (const [path, blobUrl] of Object.entries(subUrls)) {
     entrySrc = replaceAllSpec(entrySrc, `./${path}`, blobUrl);

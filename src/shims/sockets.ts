@@ -1,5 +1,5 @@
 /**
- * Browser wasi:sockets shim for @actcore/host.
+ * Browser wasi:sockets shim for @actcore/web-runtime.
  *
  * preview2-shim's browser build ships wasi:sockets as method-only stub objects
  * that OMIT the resource-class constructors (ResolveAddressStream, Network,

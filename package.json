@@ -1,14 +1,16 @@
 {
-  "name": "@actcore/host",
-  "version": "0.1.0-alpha.3",
-  "description": "Browser host for ACT (Agent Component Tools) — runs signed wasm agent tools in a browser tab",
+  "name": "@actcore/web-runtime",
+  "version": "0.1.0",
+  "description": "Web runtime for ACT (Agent Component Tools) — loads and runs signed wasm agent tools in the browser, and exposes them to browser agents via WebMCP",
   "keywords": [
     "act",
+    "agent-component-tools",
     "agent",
     "wasm",
     "webassembly",
     "component-model",
     "mcp",
+    "webmcp",
     "ai",
     "tools",
     "browser",
@@ -18,9 +20,9 @@
   "homepage": "https://actcore.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/actcore/host-browser"
+    "url": "https://github.com/actcore/web-runtime"
   },
-  "bugs": "https://github.com/actcore/host-browser/issues",
+  "bugs": "https://github.com/actcore/web-runtime/issues",
   "license": "MIT OR Apache-2.0",
   "author": "Alexander Shishenko <alex@shishenko.com>",
   "type": "module",

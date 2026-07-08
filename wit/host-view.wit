@@ -1,4 +1,4 @@
-/// What act-host implements. Drives `jco types` codegen for @actcore/host:
+/// What act-host implements. Drives `jco types` codegen for @actcore/web-runtime:
 /// imports here are the host-side capability surface that transpiled
 /// components see as their imports.
 ///

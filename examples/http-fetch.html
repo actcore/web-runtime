@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>@actcore/host — wasi:http p3 example</title>
+  <title>@actcore/web-runtime — wasi:http p3 example</title>
   <style>
     body { font-family: ui-monospace, monospace; max-width: 900px; margin: 2em auto; padding: 0 1em; }
     pre { background: #f5f5f5; padding: 1em; white-space: pre-wrap; border-radius: 4px; }
@@ -13,7 +13,7 @@
   </style>
 </head>
 <body>
-  <h1>@actcore/host — wasi:http p3</h1>
+  <h1>@actcore/web-runtime — wasi:http p3</h1>
   <p>Loads the <code>ghcr.io/actpkg/http-client</code> component (a wasip3 component
      importing <code>wasi:http/client@0.3.x</code>) and invokes its <code>fetch</code>
      tool. Verifies the bundled wasi:http p3 shim in <code>dist/shims/wasi-http.js</code>
@@ -32,7 +32,7 @@
   <script type="importmap">
   {
     "imports": {
-      "@actcore/host": "../dist/index.js",
+      "@actcore/web-runtime": "../dist/index.js",
       "@bytecodealliance/jco-transpile/vendor/js-component-bindgen-component.js":
                                                     "/node_modules/@bytecodealliance/jco-transpile/vendor/js-component-bindgen-component.js",
       "@bytecodealliance/preview2-shim/cli":        "/node_modules/@bytecodealliance/preview2-shim/dist/browser/cli.js",
@@ -47,7 +47,7 @@
   </script>
 
   <script type="module">
-    import { runComponent } from '@actcore/host';
+    import { runComponent } from '@actcore/web-runtime';
     import * as cbor from 'https://cdn.jsdelivr.net/npm/cbor2@1/+esm';
 
     const out = document.getElementById('out');

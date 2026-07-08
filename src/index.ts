@@ -1,5 +1,5 @@
 /**
- * @actcore/host — browser host for ACT (Agent Component Tools).
+ * @actcore/web-runtime — browser host for ACT (Agent Component Tools).
  *
  * Loads ACT wasm components in a browser tab via {@link
  * https://github.com/bytecodealliance/jco | jco}'s in-browser transpiler and
@@ -7,7 +7,7 @@
  *
  * @example
  * ```ts
- * import { runComponent } from '@actcore/host';
+ * import { runComponent } from '@actcore/web-runtime';
  *
  * const wasm = new Uint8Array(await (await fetch('/time.wasm')).arrayBuffer());
  * const { toolProvider } = await runComponent(wasm);
