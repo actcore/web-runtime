@@ -3,10 +3,14 @@ name: Publish to npm
 # Publishes @actcore/web-runtime to npmjs.com on a version tag (e.g. v0.1.0).
 #
 # Auth uses npm Trusted Publishing (OIDC) — no long-lived NPM_TOKEN secret.
-# One-time setup on npmjs.com: on the @actcore/web-runtime package settings (or the
-# @actcore org, pre-creating the package), add a Trusted Publisher pointing at
-#   repository: actcore/web-runtime
-#   workflow:   .github/workflows/publish.yml
+# One-time setup:
+#   1. Create a GitHub Actions environment named `npm` on the actcore/web-runtime
+#      repo (Settings → Environments); add protection rules there if desired.
+#   2. On npmjs.com, on the @actcore/web-runtime package (or the @actcore org,
+#      pre-creating the package), add a Trusted Publisher pointing at
+#        repository:  actcore/web-runtime
+#        workflow:    .github/workflows/release.yml
+#        environment: npm
 # Provenance is attested automatically (id-token: write + publishConfig.provenance).
 
 on:
@@ -22,6 +26,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm
     steps:
       - uses: actions/checkout@v4
 
