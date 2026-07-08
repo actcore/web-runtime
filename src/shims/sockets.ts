@@ -48,15 +48,28 @@ export interface SocketsPolicyPort {
   noteSocketsDenied(): void;
 }
 
-let socketsPolicy: SocketsPolicyPort | null = null;
+// See src/shims/wasi-http.ts for why this slot must live on `globalThis`
+// rather than as a module-local variable: `runComponent` sets the policy via
+// its own (bundled) copy of this module, while the guest's shim import may
+// resolve to a different module instance — a module-local slot would leave
+// the guest reading a null slot on its own instance.
+const SOCKETS_POLICY_SLOT = Symbol.for('@actcore/web-runtime:socketsPolicy');
 
 export function __setSocketsPolicy(p: SocketsPolicyPort | null): void {
-  socketsPolicy = p;
+  (globalThis as Record<symbol, unknown>)[SOCKETS_POLICY_SLOT] = p ?? undefined;
+}
+
+function getSocketsPolicy(): SocketsPolicyPort | null {
+  return (
+    ((globalThis as Record<symbol, unknown>)[SOCKETS_POLICY_SLOT] as
+      | SocketsPolicyPort
+      | undefined) ?? null
+  );
 }
 
 function denyAccess(): never {
   // Route through the engine for audit, then deny exactly as before.
-  socketsPolicy?.noteSocketsDenied();
+  getSocketsPolicy()?.noteSocketsDenied();
   throw 'access-denied';
 }
 

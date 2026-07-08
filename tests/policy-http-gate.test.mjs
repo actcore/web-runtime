@@ -153,3 +153,22 @@ test('no active policy = pass-through (unchanged legacy behavior)', async () => 
   assert.equal(resp.getStatusCode(), 204);
   await agent.close();
 });
+
+test('policy slot bridges across module instances (globalThis-backed)', async () => {
+  const modA = await import('../dist/shims/wasi-http.js');
+  const modB = await import('../dist/shims/wasi-http.js?instance=2');
+  // Sanity: they are genuinely different module instances.
+  assert.notEqual(modA.client, modB.client);
+  let fetchCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { fetchCalls++; return realFetch('https://x.example.com'); };
+  // Set the policy via instance A; call send via instance B.
+  modA.__setActivePolicy({ async decideHttp() { return 'deny'; } });
+  try {
+    await assert.rejects(() => modB.client.send(get('https://blocked.example.com/x')), (e) => e && e.tag === 'internal-error');
+    assert.equal(fetchCalls, 0, 'instance B must see the policy set on instance A');
+  } finally {
+    modA.__setActivePolicy(null);
+    globalThis.fetch = realFetch;
+  }
+});
