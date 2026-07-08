@@ -146,9 +146,16 @@ async function generateFiles(
   const t0 = performance.now();
   const viaWorker = await tryGenerateInWorker(bytes, options);
   if (viaWorker) {
-    measureTranspile('actcore:transpile', t0, 'web worker', options.name);
-    console.debug(`[@actcore/host] transpiled in Web Worker in ${fmtDuration(performance.now() - t0)} (main thread free)`);
-    return viaWorker;
+    const totalMs = performance.now() - t0;
+    const { initMs, generateMs } = viaWorker.timings;
+    const overheadMs = Math.max(0, totalMs - initMs - generateMs);
+    measureTranspile('actcore:transpile', t0, 'web worker', options.name, { initMs, generateMs, overheadMs });
+    console.debug(
+      `[@actcore/host] transpiled in Web Worker in ${fmtDuration(totalMs)} — ` +
+        `$init ${fmtDuration(initMs)}, generate ${fmtDuration(generateMs)}, ` +
+        `worker+messaging ${fmtDuration(overheadMs)} (main thread free)`,
+    );
+    return viaWorker.files;
   }
   const files = await generateOnMainThread(bytes, options);
   measureTranspile('actcore:transpile', t0, 'main thread', options.name);
@@ -162,10 +169,16 @@ async function generateFiles(
  * worker is propagated as a rejection (the component is bad; re-running on the
  * main thread would only reproduce it).
  */
+/** Worker transpile output plus the worker-side timing split. */
+interface WorkerTranspile {
+  files: TranspiledFiles;
+  timings: { initMs: number; generateMs: number };
+}
+
 function tryGenerateInWorker(
   bytes: Uint8Array,
   options: GenerateOptions,
-): Promise<TranspiledFiles | null> {
+): Promise<WorkerTranspile | null> {
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try {
@@ -188,7 +201,7 @@ function tryGenerateInWorker(
     worker.onmessage = (ev: MessageEvent) => {
       const msg = ev.data as TranspileWorkerResponse;
       if (msg && msg.ok) {
-        finish(() => resolve(msg.files));
+        finish(() => resolve({ files: msg.files, timings: msg.timings }));
       } else {
         // The worker reached `generate()` but it (or the bindgen) failed. Recover
         // on the main thread, which carries the streaming MIME fallback and is
@@ -340,21 +353,30 @@ function fmtDuration(ms: number): string {
  * that isn't structured-cloneable); the `console.debug` log still carries the
  * number in that case.
  */
-function measureTranspile(name: string, start: number, path: string, component: string): void {
+function measureTranspile(
+  name: string,
+  start: number,
+  path: string,
+  component: string,
+  breakdown?: Record<string, number>,
+): void {
   try {
+    const properties: Array<[string, string]> = [
+      ['path', path],
+      ['component', component],
+      ...Object.entries(breakdown ?? {}).map(([k, v]): [string, string] => [k, fmtDuration(v)]),
+    ];
     performance.measure(name, {
       start,
       detail: {
         path,
         component,
+        ...breakdown,
         devtools: {
           dataType: 'track-entry',
           track: '@actcore/host',
           color: 'primary',
-          properties: [
-            ['path', path],
-            ['component', component],
-          ],
+          properties,
           tooltipText: `${name} (${path})`,
         },
       },

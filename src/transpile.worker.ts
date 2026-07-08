@@ -34,9 +34,10 @@ export interface TranspileWorkerRequest {
   options: GenerateOptions;
 }
 
-/** Worker → main thread. */
+/** Worker → main thread. `timings` splits the worker's wall-clock so the main
+ * thread can attribute the total (which also spans worker startup + messaging). */
 export type TranspileWorkerResponse =
-  | { ok: true; files: Array<[string, Uint8Array]> }
+  | { ok: true; files: Array<[string, Uint8Array]>; timings: { initMs: number; generateMs: number } }
   | { ok: false; error: string };
 
 // `self` in a module worker is the DedicatedWorkerGlobalScope. The project's
@@ -54,11 +55,17 @@ ctx.onmessage = (ev: MessageEvent) => {
 
 async function handle(req: TranspileWorkerRequest): Promise<void> {
   try {
+    const t0 = performance.now();
     await $init;
+    const t1 = performance.now();
     const result = generate(req.bytes, req.options);
+    const t2 = performance.now();
     // Transfer the output buffers back to avoid a second copy of large wasm.
     const transfer = result.files.map(([, b]) => b.buffer);
-    ctx.postMessage({ ok: true, files: result.files }, transfer as Transferable[]);
+    ctx.postMessage(
+      { ok: true, files: result.files, timings: { initMs: t1 - t0, generateMs: t2 - t1 } },
+      transfer as Transferable[],
+    );
   } catch (err) {
     ctx.postMessage({ ok: false, error: String((err as Error)?.message ?? err) });
   }
