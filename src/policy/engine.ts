@@ -14,21 +14,42 @@ export interface EngineDeps {
   audit: AuditSink;
 }
 
+/** Extracts capId→description (only when the wire value is a plain string). */
+function parseDescriptions(declaredCapsJson: string): Record<string, string> {
+  const descriptions: Record<string, string> = {};
+  try {
+    const parsed: unknown = JSON.parse(declaredCapsJson);
+    if (parsed && typeof parsed === 'object') {
+      for (const [capId, decl] of Object.entries(parsed as Record<string, unknown>)) {
+        if (decl && typeof decl === 'object') {
+          const description = (decl as { description?: unknown }).description;
+          if (typeof description === 'string') descriptions[capId] = description;
+        }
+      }
+    }
+  } catch {
+    // Defensive: malformed declaredCapsJson must never break instantiation.
+  }
+  return descriptions;
+}
+
 export async function buildEngine(deps: EngineDeps): Promise<PolicyEngine> {
   await Kernel.load();
   const handle = Kernel.build(deps.declaredCapsJson, deps.policyJson);
   await deps.cache.loadPersisted();
-  return new PolicyEngine(handle, deps);
+  return new PolicyEngine(handle, deps, parseDescriptions(deps.declaredCapsJson));
 }
 
 /** Ties the wasm kernel to consent + cache + audit. Implements HttpPolicyPort. */
 export class PolicyEngine {
   #k: KernelHandle;
   #d: EngineDeps;
+  #descriptions: Record<string, string>;
   #disposed = false;
-  constructor(handle: KernelHandle, deps: EngineDeps) {
+  constructor(handle: KernelHandle, deps: EngineDeps, descriptions: Record<string, string> = {}) {
     this.#k = handle;
     this.#d = deps;
+    this.#descriptions = descriptions;
   }
 
   ceilingSummary(): string {
@@ -61,6 +82,7 @@ export class PolicyEngine {
       digest: this.#d.digest,
       capId: op.capId,
       op,
+      description: this.#descriptions[op.capId],
     });
     this.#d.cache.put(opKey, verdict);
     const result = verdict.allow ? 'allow' : 'deny';

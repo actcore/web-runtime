@@ -53,6 +53,51 @@ test('dispose() is idempotent', async () => {
   });
 });
 
+test('ask ConsentAsk carries the declared capability description', async () => {
+  const seenAsks = [];
+  const dep = {
+    componentRef: 'ref', digest: 'dig',
+    declaredCapsJson: JSON.stringify({
+      'wasi:http': {
+        constraints: [{ host: 'api.example.com' }],
+        description: 'Fetch pure-Python wheels from PyPI for the install tool. No other network use.',
+      },
+    }),
+    policyJson: JSON.stringify({ default: 'ask' }),
+    consent: new ConsentGate(async (ask) => { seenAsks.push(ask); return { allow: true, remember: 'session' }; }),
+    cache: new DecisionCache('o|ref|dig', 'none'),
+    audit: makeAuditor(() => {}),
+  };
+  const engine = await buildEngine(dep);
+  assert.equal(await engine.decideHttp(op), 'allow');
+  assert.equal(seenAsks.length, 1);
+  assert.equal(
+    seenAsks[0].description,
+    'Fetch pure-Python wheels from PyPI for the install tool. No other network use.',
+  );
+});
+
+test('ask ConsentAsk omits description when the declared value is not a plain string', async () => {
+  const seenAsks = [];
+  const dep = {
+    componentRef: 'ref', digest: 'dig',
+    declaredCapsJson: JSON.stringify({
+      'wasi:http': {
+        constraints: [{ host: 'api.example.com' }],
+        description: [['en', 'x']],
+      },
+    }),
+    policyJson: JSON.stringify({ default: 'ask' }),
+    consent: new ConsentGate(async (ask) => { seenAsks.push(ask); return { allow: true, remember: 'session' }; }),
+    cache: new DecisionCache('o|ref|dig', 'none'),
+    audit: makeAuditor(() => {}),
+  };
+  const engine = await buildEngine(dep);
+  assert.equal(await engine.decideHttp(op), 'allow');
+  assert.equal(seenAsks.length, 1);
+  assert.equal(seenAsks[0].description, undefined);
+});
+
 test('decideHttp fails closed when kernel classify() throws', async () => {
   const fakeHandle = {
     classify() {
