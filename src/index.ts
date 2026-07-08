@@ -49,3 +49,6 @@ export { clearTranspileCache } from './cache.js';
 
 export type { ResolveLocalizedStringOptions } from './locale.js';
 export { resolveLocalizedString } from './locale.js';
+
+export { isWebmcpAvailable } from './webmcp.js';
+export type { ModelContext, WebmcpToolDescriptor, WebmcpCallResult } from './webmcp.js';

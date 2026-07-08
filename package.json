@@ -53,7 +53,8 @@
   "dependencies": {
     "@bytecodealliance/jco": "^1.25.0",
     "@bytecodealliance/jco-transpile": "^0.4.1",
-    "@bytecodealliance/preview2-shim": "^0.19.0"
+    "@bytecodealliance/preview2-shim": "^0.19.0",
+    "cbor2": "^2.3.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
