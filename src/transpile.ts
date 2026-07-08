@@ -47,7 +47,7 @@ const DEFAULT_NAME = 'component';
 export async function transpileToBlobUrl(
   bytes: Uint8Array,
   options: RunComponentOptions,
-): Promise<string> {
+): Promise<{ url: string; revoke: () => void }> {
   const shimBase = normalizeShimBase(options.shimBase);
   const name = options.name ?? DEFAULT_NAME;
   // Host-view exports wasi:http p3 from our own shim (see wit/host-view.wit
@@ -250,7 +250,7 @@ async function buildBlobModuleGraph(
   files: CachedFiles,
   name: string,
   shimBase: string,
-): Promise<string> {
+): Promise<{ url: string; revoke: () => void }> {
   const fileMap = new Map<string, Blob>(files);
 
   // 1. .wasm files → blob URLs directly. The Blobs are already disk-backed
@@ -309,9 +309,18 @@ async function buildBlobModuleGraph(
     entrySrc = replaceAllSpec(entrySrc, `./${path}`, blobUrl);
   }
 
-  return URL.createObjectURL(
+  const entryUrl = URL.createObjectURL(
     new Blob([entrySrc], { type: 'application/javascript' }),
   );
+  // Revoke every blob URL once the caller has imported the entry module: by
+  // then the wasm has been fetched + compiled and the sub-modules loaded, so
+  // holding these alive just leaks the (~100MB) core-wasm blob on every run.
+  const revoke = () => {
+    URL.revokeObjectURL(entryUrl);
+    for (const u of Object.values(wasmUrls)) URL.revokeObjectURL(u);
+    for (const u of Object.values(subUrls)) URL.revokeObjectURL(u);
+  };
+  return { url: entryUrl, revoke };
 }
 
 /**

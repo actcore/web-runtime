@@ -100,17 +100,24 @@ export async function runComponent(
 
   installCompileStreamingFallback();
 
-  const entryBlobUrl = await transpileToBlobUrl(bytes, options);
+  const { url: entryBlobUrl, revoke: revokeBlobUrls } = await transpileToBlobUrl(bytes, options);
 
   // Dynamic import from a blob: URL compiles + instantiates the component's core
   // wasm in the page realm — a synchronous, main-thread-blocking step that, for
   // large components, freezes the tab *after* the off-thread transpile above.
   // Measure it separately so that freeze is quantified, not hidden.
   const tInstantiate = performance.now();
-  const mod = (await import(/* @vite-ignore */ entryBlobUrl)) as {
-    toolProvider?: ToolProvider;
-    sessionProvider?: SessionProvider;
-  };
+  let mod: { toolProvider?: ToolProvider; sessionProvider?: SessionProvider };
+  try {
+    mod = (await import(/* @vite-ignore */ entryBlobUrl)) as {
+      toolProvider?: ToolProvider;
+      sessionProvider?: SessionProvider;
+    };
+  } finally {
+    // The module has fetched + compiled its (~100MB) core wasm by now; free the
+    // blob URLs so they don't accumulate (leak ~100MB) across runs.
+    revokeBlobUrls();
+  }
   measurePhase('actcore:instantiate', tInstantiate, { component: options.name ?? 'component' });
   console.debug(
     `[@actcore/host] instantiated on main thread in ${fmtDuration(performance.now() - tInstantiate)}`,
