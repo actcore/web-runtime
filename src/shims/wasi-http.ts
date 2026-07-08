@@ -21,6 +21,23 @@ import type {
   StatusCode,
   Result,
 } from '../generated/interfaces/wasi-http-types.js';
+import type { ResourceOp } from '../policy/types.js';
+
+/**
+ * Minimal port the http PEP calls. Widened in the consent task to resolve
+ * `ask`; `runComponent` installs the real engine before instantiation.
+ * v1 limitation: a single module-level slot ⇒ one governed component per
+ * page realm at a time (see the design spec).
+ */
+export interface HttpPolicyPort {
+  decideHttp(op: ResourceOp): Promise<'allow' | 'deny'>;
+}
+
+let activePolicy: HttpPolicyPort | null = null;
+
+export function __setActivePolicy(p: HttpPolicyPort | null): void {
+  activePolicy = p;
+}
 
 // Local aliases: at runtime, jco passes our concrete Fields class through
 // for Headers/Trailers params (see fixture line 9484: `Request.new(rsc0, ...)`
@@ -434,6 +451,26 @@ export const client = {
     if (!authority) throw internalError('request missing authority');
     const path = request.getPathWithQuery() ?? '/';
     const url = `${scheme}://${authority}${path}`;
+
+    // Policy gate. Build the ResourceOp the native host builds, ask the engine,
+    // and deny by throwing a raw WIT error-code (never `new Error`).
+    if (activePolicy) {
+      const port = authority.includes(':')
+        ? authority.slice(authority.lastIndexOf(':') + 1)
+        : scheme === 'https' ? '443' : '80';
+      const host = authority.includes(':')
+        ? authority.slice(0, authority.lastIndexOf(':'))
+        : authority;
+      const decision = await activePolicy.decideHttp({
+        capId: 'wasi:http',
+        key: `${host}:${port}`,
+        action: method,
+        attrs: { scheme },
+      });
+      if (decision === 'deny') {
+        throw internalError(`wasi:http denied by policy: ${host}:${port}`);
+      }
+    }
 
     // `Headers` is locally aliased to `Fields`; use the global fetch class
     // explicitly to avoid shadowing.
