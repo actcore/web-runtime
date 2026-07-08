@@ -33,10 +33,26 @@ export interface HttpPolicyPort {
   decideHttp(op: ResourceOp): Promise<'allow' | 'deny'>;
 }
 
-let activePolicy: HttpPolicyPort | null = null;
+// `runComponent` sets the policy via its own (bundled) copy of this module,
+// while the guest's shim import may resolve to a different module instance
+// (e.g. loaded from a vendored `/host/shims/wasi-http.js` URL). A plain
+// module-local slot would leave the guest reading a null slot on its own
+// instance while `runComponent` sets the slot on a different instance — the
+// gate would never fire. Back the slot with `globalThis` (keyed by a shared
+// Symbol) so every instance of this module in the realm reads/writes the
+// same slot.
+const HTTP_POLICY_SLOT = Symbol.for('@actcore/web-runtime:httpPolicy');
 
 export function __setActivePolicy(p: HttpPolicyPort | null): void {
-  activePolicy = p;
+  (globalThis as Record<symbol, unknown>)[HTTP_POLICY_SLOT] = p ?? undefined;
+}
+
+function getActivePolicy(): HttpPolicyPort | null {
+  return (
+    ((globalThis as Record<symbol, unknown>)[HTTP_POLICY_SLOT] as
+      | HttpPolicyPort
+      | undefined) ?? null
+  );
 }
 
 // Local aliases: at runtime, jco passes our concrete Fields class through
@@ -454,6 +470,7 @@ export const client = {
 
     // Policy gate. Build the ResourceOp the native host builds, ask the engine,
     // and deny by throwing a raw WIT error-code (never `new Error`).
+    const activePolicy = getActivePolicy();
     if (activePolicy) {
       let host: string;
       let port: string;
