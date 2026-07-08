@@ -1,4 +1,5 @@
 import { applyPatches, rewriteBareImports } from './patches.js';
+import { fmtDuration, measurePhase } from './timing.js';
 import type { RunComponentOptions } from './host-api.js';
 import type { GenerateOptions } from '@bytecodealliance/jco-transpile/vendor/js-component-bindgen-component.js';
 import type { TranspileWorkerRequest, TranspileWorkerResponse } from './transpile.worker.js';
@@ -75,7 +76,7 @@ export async function transpileToBlobUrl(
       cacheKey = await deriveTranspileCacheKey({ bytes, name, shimBase, wasiHttpShimUrl, wasiSocketsShimUrl });
       const cached = await getCachedFiles(cacheKey);
       if (cached) {
-        measureTranspile('actcore:transpile-cache-hit', t0, 'cache', name);
+        measurePhase('actcore:transpile-cache-hit', t0, { path: 'cache', component: name });
         console.debug(`[@actcore/host] transpile cache hit in ${fmtDuration(performance.now() - t0)} — skipping generate()`);
         return buildBlobModuleGraph(cached, name, shimBase);
       }
@@ -149,7 +150,7 @@ async function generateFiles(
     const totalMs = performance.now() - t0;
     const { initMs, generateMs } = viaWorker.timings;
     const overheadMs = Math.max(0, totalMs - initMs - generateMs);
-    measureTranspile('actcore:transpile', t0, 'web worker', options.name, { initMs, generateMs, overheadMs });
+    measurePhase('actcore:transpile', t0, { path: 'web worker', component: options.name }, { initMs, generateMs, overheadMs });
     console.debug(
       `[@actcore/host] transpiled in Web Worker in ${fmtDuration(totalMs)} — ` +
         `$init ${fmtDuration(initMs)}, generate ${fmtDuration(generateMs)}, ` +
@@ -158,7 +159,7 @@ async function generateFiles(
     return viaWorker.files;
   }
   const files = await generateOnMainThread(bytes, options);
-  measureTranspile('actcore:transpile', t0, 'main thread', options.name);
+  measurePhase('actcore:transpile', t0, { path: 'main thread', component: options.name });
   console.debug(`[@actcore/host] transpiled on main thread in ${fmtDuration(performance.now() - t0)} (worker unavailable)`);
   return files;
 }
@@ -332,56 +333,4 @@ function replaceAllSpec(src: string, from: string, to: string): string {
 
 function normalizeShimBase(base: string): string {
   return base.endsWith('/') ? base : base + '/';
-}
-
-/** Compact duration for the transpile timing logs: `85ms` under 1s, else `9.2s`. */
-function fmtDuration(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
-}
-
-/**
- * Record a User Timing `measure` spanning `start`→now, so a transpile shows up
- * in the DevTools Performance panel and is readable programmatically via
- * `performance.getEntriesByType('measure')` / a `PerformanceObserver`.
- * `performance.measure()` is Baseline and available in workers.
- *
- * `detail.devtools` is Chrome's Performance-panel extensibility API: it groups
- * these measures into a labeled "@actcore/host" track with the given properties.
- * Other engines ignore it and keep the plain measure.
- *
- * Best-effort — never throws (an engine may lack `measure`, or reject a `detail`
- * that isn't structured-cloneable); the `console.debug` log still carries the
- * number in that case.
- */
-function measureTranspile(
-  name: string,
-  start: number,
-  path: string,
-  component: string,
-  breakdown?: Record<string, number>,
-): void {
-  try {
-    const properties: Array<[string, string]> = [
-      ['path', path],
-      ['component', component],
-      ...Object.entries(breakdown ?? {}).map(([k, v]): [string, string] => [k, fmtDuration(v)]),
-    ];
-    performance.measure(name, {
-      start,
-      detail: {
-        path,
-        component,
-        ...breakdown,
-        devtools: {
-          dataType: 'track-entry',
-          track: '@actcore/host',
-          color: 'primary',
-          properties,
-          tooltipText: `${name} (${path})`,
-        },
-      },
-    });
-  } catch {
-    // User Timing unavailable or `detail` not cloneable — ignore.
-  }
 }

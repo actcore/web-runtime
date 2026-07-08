@@ -5,6 +5,7 @@ import type {
 import type { Cbor, Metadata } from './generated/interfaces/act-core-types.js';
 
 import { transpileToBlobUrl } from './transpile.js';
+import { fmtDuration, measurePhase } from './timing.js';
 import { installCompileStreamingFallback } from './streaming-fallback.js';
 
 /**
@@ -101,11 +102,19 @@ export async function runComponent(
 
   const entryBlobUrl = await transpileToBlobUrl(bytes, options);
 
-  // Dynamic import from blob: URL is supported in all browsers with ESM modules.
+  // Dynamic import from a blob: URL compiles + instantiates the component's core
+  // wasm in the page realm — a synchronous, main-thread-blocking step that, for
+  // large components, freezes the tab *after* the off-thread transpile above.
+  // Measure it separately so that freeze is quantified, not hidden.
+  const tInstantiate = performance.now();
   const mod = (await import(/* @vite-ignore */ entryBlobUrl)) as {
     toolProvider?: ToolProvider;
     sessionProvider?: SessionProvider;
   };
+  measurePhase('actcore:instantiate', tInstantiate, { component: options.name ?? 'component' });
+  console.debug(
+    `[@actcore/host] instantiated on main thread in ${fmtDuration(performance.now() - tInstantiate)}`,
+  );
 
   if (!mod.toolProvider) {
     throw new Error(
