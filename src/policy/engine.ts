@@ -1,7 +1,7 @@
 import type { AuditSink } from './audit.js';
 import type { ConsentGate } from './consent.js';
 import type { DecisionCache } from './cache.js';
-import type { AuditRecord, ResourceOp } from './types.js';
+import type { AuditRecord, ResourceOp, Verdict } from './types.js';
 import { Kernel, type KernelHandle } from './kernel.js';
 
 export interface EngineDeps {
@@ -46,6 +46,14 @@ export class PolicyEngine {
   #d: EngineDeps;
   #descriptions: Record<string, string>;
   #disposed = false;
+  /**
+   * In-flight consent decisions keyed by opKey. Coalesces concurrent `ask`s for
+   * the SAME op onto a single prompt: a guest may fire several requests to one
+   * host at once (e.g. micropip firing two concurrent wheel fetches), and
+   * without this each would raise its own prompt while a single-slot prompter
+   * drops all but the last — leaving the other guest tasks suspended forever.
+   */
+  #inflight = new Map<string, Promise<Verdict>>();
   constructor(handle: KernelHandle, deps: EngineDeps, descriptions: Record<string, string> = {}) {
     this.#k = handle;
     this.#d = deps;
@@ -76,18 +84,27 @@ export class PolicyEngine {
       this.#emit(op, decision, 'policy');
       return decision;
     }
-    // ask → route to the injected consent handler; remember the verdict.
-    const verdict = await this.#d.consent.decide({
-      componentRef: this.#d.componentRef,
-      digest: this.#d.digest,
-      capId: op.capId,
-      op,
-      description: this.#descriptions[op.capId],
-    });
+    // ask → route to the injected consent handler, coalescing concurrent asks
+    // for the same op onto ONE prompt (see #inflight). Each request still
+    // remembers + audits once the shared verdict resolves.
+    let pending = this.#inflight.get(opKey);
+    if (!pending) {
+      pending = this.#d.consent.decide({
+        componentRef: this.#d.componentRef,
+        digest: this.#d.digest,
+        capId: op.capId,
+        op,
+        description: this.#descriptions[op.capId],
+      });
+      this.#inflight.set(opKey, pending);
+      // Drop the in-flight entry once resolved so a later, non-cached access
+      // re-prompts; remembered decisions are served from the cache above.
+      void pending.finally(() => this.#inflight.delete(opKey));
+    }
+    const verdict = await pending;
     this.#d.cache.put(opKey, verdict);
-    const result = verdict.allow ? 'allow' : 'deny';
     this.#emitAsk(op, verdict.allow);
-    return result;
+    return verdict.allow ? 'allow' : 'deny';
   }
 
   /**
