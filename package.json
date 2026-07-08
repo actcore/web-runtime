@@ -43,7 +43,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run gen-version && npm run gen-types && tsc",
+    "build": "npm run gen-version && npm run gen-types && tsc && node scripts/copy-wasm-glue.mjs",
+    "build:policy-wasm": "node scripts/build-policy-wasm.mjs",
     "gen-version": "node scripts/gen-version.mjs",
     "clean": "rm -rf dist src/generated",
     "typecheck": "tsc --noEmit",
