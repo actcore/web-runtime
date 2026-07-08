@@ -7,6 +7,7 @@ import {
   getCachedFiles,
   putCachedFiles,
   type TranspiledFiles,
+  type CachedFiles,
 } from './cache.js';
 
 // The in-browser transpiler. jco 1.24.x moved transpile logic into the
@@ -70,10 +71,12 @@ export async function transpileToBlobUrl(
   let cacheKey: string | null = null;
   if (useCache) {
     try {
+      const t0 = performance.now();
       cacheKey = await deriveTranspileCacheKey({ bytes, name, shimBase, wasiHttpShimUrl, wasiSocketsShimUrl });
       const cached = await getCachedFiles(cacheKey);
       if (cached) {
-        console.debug('[@actcore/host] transpile cache hit — skipping generate()');
+        measureTranspile('actcore:transpile-cache-hit', t0, 'cache', name);
+        console.debug(`[@actcore/host] transpile cache hit in ${fmtDuration(performance.now() - t0)} — skipping generate()`);
         return buildBlobModuleGraph(cached, name, shimBase);
       }
     } catch {
@@ -81,8 +84,10 @@ export async function transpileToBlobUrl(
     }
   }
 
-  // 2. Cache miss: transpile (worker, or main thread on fallback).
-  const files = await generateFiles(bytes, generateOptions);
+  // 2. Cache miss: transpile (worker, or main thread on fallback). Convert to
+  //    Blobs once — this is the sole copy of the ~100MB core wasm, then reused
+  //    by both the cache store and the module graph (no second `new Blob`).
+  const files = filesToBlobs(await generateFiles(bytes, generateOptions));
 
   // 3. Populate the cache for next time. Best-effort and non-blocking.
   if (cacheKey) void putCachedFiles(cacheKey, files);
@@ -138,13 +143,17 @@ async function generateFiles(
   bytes: Uint8Array,
   options: GenerateOptions,
 ): Promise<TranspiledFiles> {
+  const t0 = performance.now();
   const viaWorker = await tryGenerateInWorker(bytes, options);
   if (viaWorker) {
-    console.debug('[@actcore/host] transpiled in Web Worker (main thread free)');
+    measureTranspile('actcore:transpile', t0, 'web worker', options.name);
+    console.debug(`[@actcore/host] transpiled in Web Worker in ${fmtDuration(performance.now() - t0)} (main thread free)`);
     return viaWorker;
   }
-  console.debug('[@actcore/host] transpiled on main thread (worker unavailable)');
-  return generateOnMainThread(bytes, options);
+  const files = await generateOnMainThread(bytes, options);
+  measureTranspile('actcore:transpile', t0, 'main thread', options.name);
+  console.debug(`[@actcore/host] transpiled on main thread in ${fmtDuration(performance.now() - t0)} (worker unavailable)`);
+  return files;
 }
 
 /**
@@ -223,30 +232,29 @@ async function generateOnMainThread(
  * each .wasm file becomes its own blob, and the entry module gets the
  * runtime patches applied (STREAM_TABLES decl + custom lifts).
  */
-function buildBlobModuleGraph(
-  files: TranspiledFiles,
+async function buildBlobModuleGraph(
+  files: CachedFiles,
   name: string,
   shimBase: string,
-): string {
-  const decoder = new TextDecoder();
-  const fileMap = new Map<string, Uint8Array>(files);
+): Promise<string> {
+  const fileMap = new Map<string, Blob>(files);
 
-  // 1. Blob-ify all .wasm files first; rewrite refs to those.
+  // 1. .wasm files → blob URLs directly. The Blobs are already disk-backed
+  //    (from the cache or `filesToBlobs`), so this is a zero-copy
+  //    `createObjectURL` — the ~100MB core wasm is never materialized in JS.
   const wasmUrls: Record<string, string> = {};
-  for (const [path, bytes] of files) {
+  for (const [path, blob] of files) {
     if (path.endsWith('.wasm')) {
-      wasmUrls[path] = URL.createObjectURL(
-        new Blob([bytes as BlobPart], { type: 'application/wasm' }),
-      );
+      wasmUrls[path] = URL.createObjectURL(blob);
     }
   }
 
   // 2. Sub-modules in interfaces/. Rewrite bare imports then blob-ify; index
   //    them by their relative path so the entry can refer to them.
   const subUrls: Record<string, string> = {};
-  for (const [path, bytes] of files) {
+  for (const [path, blob] of files) {
     if (!path.endsWith('.js') || !path.includes('/')) continue;
-    const src = rewriteBareImports(decoder.decode(bytes), shimBase);
+    const src = rewriteBareImports(await blob.text(), shimBase);
     subUrls[path] = URL.createObjectURL(
       new Blob([src], { type: 'application/javascript' }),
     );
@@ -255,12 +263,12 @@ function buildBlobModuleGraph(
   // 3. Entry .js — apply runtime patches (future/stream drop guard), bare-import
   //    and relative-import rewrites. Returns a single blob URL.
   const entryFilename = `${name}.js`;
-  const entryBytes = fileMap.get(entryFilename);
-  if (!entryBytes) {
+  const entryBlob = fileMap.get(entryFilename);
+  if (!entryBlob) {
     throw new Error(`jco transpile output missing entry module ${entryFilename}`);
   }
 
-  let entrySrc = decoder.decode(entryBytes);
+  let entrySrc = await entryBlob.text();
   entrySrc = applyPatches(entrySrc);
   entrySrc = rewriteBareImports(entrySrc, shimBase);
 
@@ -292,10 +300,66 @@ function buildBlobModuleGraph(
   );
 }
 
+/**
+ * Convert raw `generate()` output (Uint8Array per file) into `Blob`s so the
+ * cache stores them by reference and the module graph replays them zero-copy.
+ * `.wasm` gets `application/wasm` (used directly as a blob URL); the JS files
+ * are re-blobbed after text rewriting, so their type here doesn't matter.
+ */
+function filesToBlobs(files: TranspiledFiles): CachedFiles {
+  return files.map(([path, bytes]) => [
+    path,
+    new Blob([bytes as BlobPart], path.endsWith('.wasm') ? { type: 'application/wasm' } : {}),
+  ]);
+}
+
 function replaceAllSpec(src: string, from: string, to: string): string {
   return src.replaceAll(`'${from}'`, `'${to}'`).replaceAll(`"${from}"`, `"${to}"`);
 }
 
 function normalizeShimBase(base: string): string {
   return base.endsWith('/') ? base : base + '/';
+}
+
+/** Compact duration for the transpile timing logs: `85ms` under 1s, else `9.2s`. */
+function fmtDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+/**
+ * Record a User Timing `measure` spanning `start`→now, so a transpile shows up
+ * in the DevTools Performance panel and is readable programmatically via
+ * `performance.getEntriesByType('measure')` / a `PerformanceObserver`.
+ * `performance.measure()` is Baseline and available in workers.
+ *
+ * `detail.devtools` is Chrome's Performance-panel extensibility API: it groups
+ * these measures into a labeled "@actcore/host" track with the given properties.
+ * Other engines ignore it and keep the plain measure.
+ *
+ * Best-effort — never throws (an engine may lack `measure`, or reject a `detail`
+ * that isn't structured-cloneable); the `console.debug` log still carries the
+ * number in that case.
+ */
+function measureTranspile(name: string, start: number, path: string, component: string): void {
+  try {
+    performance.measure(name, {
+      start,
+      detail: {
+        path,
+        component,
+        devtools: {
+          dataType: 'track-entry',
+          track: '@actcore/host',
+          color: 'primary',
+          properties: [
+            ['path', path],
+            ['component', component],
+          ],
+          tooltipText: `${name} (${path})`,
+        },
+      },
+    });
+  } catch {
+    // User Timing unavailable or `detail` not cloneable — ignore.
+  }
 }
