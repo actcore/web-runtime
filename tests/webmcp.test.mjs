@@ -73,3 +73,64 @@ test('buildAnnotations sets untrustedContentHint true, readOnlyHint from meta', 
   });
   assert.deepEqual(buildAnnotations([]), { untrustedContentHint: true });
 });
+
+import { decode as decodeCbor } from 'cbor2';
+import { buildExecute } from '../dist/webmcp.js';
+
+const td = new TextDecoder();
+const te = new TextEncoder();
+
+function toolDef(name) {
+  return { name, description: { tag: 'plain', val: `desc ${name}` }, parametersSchema: '{"type":"object"}', metadata: [] };
+}
+
+function immediateText(text) {
+  return { tag: 'immediate', val: [{ tag: 'content', val: { data: te.encode(text), mimeType: 'text/plain', metadata: [] } }] };
+}
+
+test('buildExecute returns MCP text content for an immediate result', async () => {
+  const provider = { async listTools() { return { metadata: [], tools: [] }; }, async callTool() { return immediateText('12:00'); } };
+  const execute = buildExecute(provider, toolDef('t'), {});
+  const result = await execute({});
+  assert.deepEqual(result, { content: [{ type: 'text', text: '12:00' }] });
+});
+
+test('buildExecute marks isError for an error event', async () => {
+  const errResult = { tag: 'immediate', val: [{ tag: 'error', val: { kind: 'boom', message: { tag: 'plain', val: 'bad' }, metadata: [] } }] };
+  const provider = { async listTools() { return { metadata: [], tools: [] }; }, async callTool() { return errResult; } };
+  const result = await buildExecute(provider, toolDef('t'), {})({});
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /boom · bad/);
+});
+
+test('buildExecute drains a streaming ReadableStream result', async () => {
+  const stream = new ReadableStream({
+    start(c) {
+      c.enqueue({ tag: 'content', val: { data: te.encode('chunk'), mimeType: 'text/plain', metadata: [] } });
+      c.close();
+    },
+  });
+  const provider = { async listTools() { return { metadata: [], tools: [] }; }, async callTool() { return { tag: 'streaming', val: stream }; } };
+  const result = await buildExecute(provider, toolDef('t'), {})({});
+  assert.equal(result.content[0].text, 'chunk');
+});
+
+test('buildExecute forwards std:session-id metadata and dcbor args', async () => {
+  let captured;
+  const provider = {
+    async listTools() { return { metadata: [], tools: [] }; },
+    async callTool(name, args, metadata) { captured = { name, args, metadata }; return immediateText('ok'); },
+  };
+  await buildExecute(provider, toolDef('do'), { getSessionId: () => 'sess-1' })({ a: 1 });
+  assert.equal(captured.name, 'do');
+  assert.deepEqual(decodeCbor(captured.args), { a: 1 });
+  assert.equal(captured.metadata[0][0], 'std:session-id');
+  assert.equal(decodeCbor(captured.metadata[0][1]), 'sess-1');
+});
+
+test('buildExecute catches a thrown provider error', async () => {
+  const provider = { async listTools() { return { metadata: [], tools: [] }; }, async callTool() { throw new Error('kaboom'); } };
+  const result = await buildExecute(provider, toolDef('t'), {})({});
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /kaboom/);
+});

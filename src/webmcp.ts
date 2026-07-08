@@ -7,8 +7,12 @@
  * Spec: https://webmachinelearning.github.io/webmcp/
  */
 
-import { decode } from 'cbor2';
+import { decode, encode } from 'cbor2';
 import type { Metadata } from './generated/interfaces/act-core-types.js';
+import type { ToolProvider } from './host-api.js';
+import type { ToolDefinition, ToolEvent } from './generated/interfaces/act-tools-types.js';
+import type { ToolResult } from './generated/interfaces/act-tools-tool-provider.js';
+import { resolveLocalizedString } from './locale.js';
 
 /** MCP-style result an `execute` handler returns. */
 export interface WebmcpCallResult {
@@ -99,5 +103,95 @@ export function buildAnnotations(
   return {
     ...(readOnly !== undefined ? { readOnlyHint: readOnly } : {}),
     untrustedContentHint: true,
+  };
+}
+
+/** Options for {@link exposeToWebmcp}. */
+export interface ExposeWebmcpOptions {
+  /** Current session id, read per invocation; when set, forwarded as
+   *  `std:session-id` metadata on every callTool. */
+  getSessionId?: () => string | null | undefined;
+  /** WebMCP `exposedTo` origin allowlist. Omit for default visibility. */
+  exposedTo?: string[];
+}
+
+/** wasi:http content-parts surface mimeType as an `option<string>` variant
+ *  (`{tag:'some',val}`) rather than a plain string; normalise both. */
+function normalizeMime(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object' && (raw as { tag?: string }).tag === 'some') {
+    return String((raw as { val: string }).val);
+  }
+  return 'application/octet-stream';
+}
+
+function asBytes(data: unknown): Uint8Array {
+  if (data instanceof Uint8Array) return data;
+  return new Uint8Array(Array.isArray(data) ? (data as number[]) : []);
+}
+
+/** Collect a ToolResult's events (immediate array or streaming ReadableStream)
+ *  into a single text blob, flagging whether a terminal error occurred. */
+async function drainToText(result: ToolResult): Promise<{ text: string; isError: boolean }> {
+  const events: ToolEvent[] = [];
+  if (result.tag === 'immediate') {
+    events.push(...result.val);
+  } else {
+    const val = result.val as unknown as ReadableStream<ToolEvent> | ToolEvent[];
+    if (Array.isArray(val)) {
+      events.push(...val);
+    } else {
+      const reader = val.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) events.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+  }
+
+  const parts: string[] = [];
+  let isError = false;
+  for (const ev of events) {
+    if (ev.tag === 'content') {
+      const mime = normalizeMime(ev.val.mimeType);
+      const data = asBytes(ev.val.data);
+      if (mime.startsWith('text/') || mime === 'application/json') {
+        parts.push(new TextDecoder().decode(data));
+      } else {
+        parts.push(`(${mime}, ${data.length} bytes)`);
+      }
+    } else {
+      isError = true;
+      parts.push(`error: ${ev.val.kind} · ${resolveLocalizedString(ev.val.message)}`);
+    }
+  }
+  return { text: parts.join('\n'), isError };
+}
+
+/** Build the WebMCP `execute` handler that bridges to `ToolProvider.callTool`. */
+export function buildExecute(
+  provider: ToolProvider,
+  def: ToolDefinition,
+  options: ExposeWebmcpOptions,
+): (input: Record<string, unknown>) => Promise<WebmcpCallResult> {
+  return async (input) => {
+    try {
+      const argBytes = encode(input ?? {}, { dcbor: true });
+      const sessionId = options.getSessionId?.();
+      const meta: Metadata = sessionId
+        ? [['std:session-id', encode(sessionId, { dcbor: true })]]
+        : [];
+      const result = await provider.callTool(def.name, argBytes, meta);
+      const { text, isError } = await drainToText(result);
+      return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) };
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      return { content: [{ type: 'text', text: msg }], isError: true };
+    }
   };
 }
