@@ -72,7 +72,7 @@ export function parseInputSchema(schemaStr: string): object {
   if (schemaStr && schemaStr.trim()) {
     try {
       const parsed = JSON.parse(schemaStr);
-      if (parsed && typeof parsed === 'object') return parsed as object;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as object;
     } catch {
       /* fall through to default */
     }
@@ -137,6 +137,8 @@ async function drainToText(result: ToolResult): Promise<{ text: string; isError:
   if (result.tag === 'immediate') {
     events.push(...result.val);
   } else {
+    // Typed as ReadableStream, but accept an already-drained array too — some intermediaries
+    // normalise streaming→immediate (mirrors normalizeMime's static-vs-runtime note).
     const val = result.val as unknown as ReadableStream<ToolEvent> | ToolEvent[];
     if (Array.isArray(val)) {
       events.push(...val);
@@ -182,6 +184,8 @@ export function buildExecute(
   return async (input) => {
     try {
       const argBytes = encode(input ?? {}, { dcbor: true });
+      // Forward std:session-id only for a non-empty session id; null,
+      // undefined, and "" (a meaningless id) are all omitted.
       const sessionId = options.getSessionId?.();
       const meta: Metadata = sessionId
         ? [['std:session-id', encode(sessionId, { dcbor: true })]]
@@ -238,15 +242,15 @@ export async function exposeToWebmcp(
   const controller = new AbortController();
   let count = 0;
   for (const def of tools) {
-    const descriptor = toDescriptor(provider, def, options);
     try {
+      const descriptor = toDescriptor(provider, def, options);
       await mc.registerTool(descriptor, {
         signal: controller.signal,
         ...(options.exposedTo ? { exposedTo: options.exposedTo } : {}),
       });
       count++;
     } catch (err) {
-      console.warn(`[webmcp] registerTool("${descriptor.name}") failed:`, err);
+      console.warn(`[webmcp] registerTool for "${def.name}" failed:`, err);
     }
   }
   return { count, available: true, dispose: () => controller.abort() };

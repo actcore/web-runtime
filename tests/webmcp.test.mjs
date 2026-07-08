@@ -192,3 +192,23 @@ test('exposeToWebmcp skips a failing registerTool but counts the rest', async ()
     delete globalThis.document;
   }
 });
+
+test('readReadOnlyHint / buildAnnotations propagate an explicit false', () => {
+  const meta = [['std:read-only', encode(false, { dcbor: true })]];
+  assert.equal(readReadOnlyHint(meta), false);
+  assert.deepEqual(buildAnnotations(meta), { readOnlyHint: false, untrustedContentHint: true });
+});
+
+test('parseInputSchema falls back for a JSON array', () => {
+  assert.deepEqual(parseInputSchema('[1,2,3]'), { type: 'object', properties: {} });
+});
+
+test('buildExecute omits session metadata for an empty-string session id', async () => {
+  let captured;
+  const provider = {
+    async listTools() { return { metadata: [], tools: [] }; },
+    async callTool(name, args, metadata) { captured = { name, args, metadata }; return immediateText('ok'); },
+  };
+  await buildExecute(provider, toolDef('t'), { getSessionId: () => '' })({});
+  assert.deepEqual(captured.metadata, []);
+});
