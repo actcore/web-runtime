@@ -126,3 +126,28 @@ test('decideHttp fails closed when kernel classify() throws', async () => {
     assert.equal(result, 'deny');
   });
 });
+
+test('concurrent asks for the same op are coalesced into one prompt', async () => {
+  // A guest may fire several requests to one host at once (e.g. micropip
+  // firing two concurrent wheel fetches). Each hits `ask`; without coalescing
+  // each raises its own prompt and a single-slot prompter drops all but the
+  // last, leaving the other guest tasks suspended forever. Coalescing routes
+  // all concurrent same-op asks through ONE consent prompt.
+  let asks = 0;
+  let resolveConsent;
+  const handler = () => {
+    asks++;
+    return new Promise((r) => {
+      resolveConsent = r;
+    });
+  };
+  const { dep } = deps(JSON.stringify({ default: 'ask' }), handler);
+  const engine = await buildEngine(dep);
+  const p1 = engine.decideHttp(op);
+  const p2 = engine.decideHttp(op);
+  await new Promise((r) => setTimeout(r, 10)); // let both reach the ask branch
+  assert.equal(asks, 1, 'concurrent same-op asks must share ONE prompt');
+  resolveConsent({ allow: true, remember: 'session' });
+  assert.equal(await p1, 'allow');
+  assert.equal(await p2, 'allow');
+});
