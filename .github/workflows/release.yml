@@ -32,12 +32,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # Node 24 bundles npm >= 11.5.1 (required for OIDC Trusted Publishing)
+          # as a complete install — avoids the `npm i -g npm@latest` global-upgrade
+          # bug where provenance's `sigstore` dep goes missing.
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-
-      # Trusted Publishing (OIDC) requires npm >= 11.5.1.
-      - name: Upgrade npm
-        run: npm install -g npm@latest
 
       # wit/deps is gitignored and fetched via wkg (pinned by wkg.lock);
       # gen-types needs it present before tsc.
