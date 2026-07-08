@@ -1,6 +1,6 @@
 name: Publish to npm
 
-# Publishes @actcore/web-runtime to npmjs.com on a version tag (e.g. v0.1.0).
+# Publishes @actcore/web-runtime to npmjs.com on a version tag (e.g. 0.1.0).
 #
 # Auth uses npm Trusted Publishing (OIDC) — no long-lived NPM_TOKEN secret.
 # One-time setup:
@@ -16,7 +16,7 @@ name: Publish to npm
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
 
 permissions:

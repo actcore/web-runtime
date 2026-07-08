@@ -1,6 +1,6 @@
 {
   "name": "@actcore/web-runtime",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Web runtime for ACT (Agent Component Tools) — loads and runs signed wasm agent tools in the browser, and exposes them to browser agents via WebMCP",
   "keywords": [
     "act",
