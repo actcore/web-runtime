@@ -134,3 +134,61 @@ test('buildExecute catches a thrown provider error', async () => {
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /kaboom/);
 });
+
+import { toDescriptor, exposeToWebmcp } from '../dist/webmcp.js';
+
+const fakeProvider = { async listTools() { return { metadata: [], tools: [] }; }, async callTool() { return immediateText('x'); } };
+
+test('toDescriptor maps every field', () => {
+  const def = { name: 'get time', description: { tag: 'plain', val: 'gets time' }, parametersSchema: '{"type":"object"}', metadata: [] };
+  const d = toDescriptor(fakeProvider, def, {});
+  assert.equal(d.name, 'get_time');
+  assert.equal(d.description, 'gets time');
+  assert.deepEqual(d.inputSchema, { type: 'object' });
+  assert.deepEqual(d.annotations, { untrustedContentHint: true });
+  assert.equal(typeof d.execute, 'function');
+});
+
+test('exposeToWebmcp registers all tools and reports count', async () => {
+  const registered = [];
+  globalThis.document = { modelContext: { async registerTool(t, o) { registered.push({ t, o }); } } };
+  try {
+    const exposure = await exposeToWebmcp(fakeProvider, [toolDef('a'), toolDef('b')]);
+    assert.equal(exposure.available, true);
+    assert.equal(exposure.count, 2);
+    assert.equal(registered.length, 2);
+    assert.equal(registered[0].t.name, 'a');
+    assert.ok(registered[0].o.signal instanceof AbortSignal);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('exposeToWebmcp dispose aborts the registration signal', async () => {
+  let signal;
+  globalThis.document = { modelContext: { async registerTool(_t, o) { signal = o.signal; } } };
+  try {
+    const exposure = await exposeToWebmcp(fakeProvider, [toolDef('a')]);
+    assert.equal(signal.aborted, false);
+    exposure.dispose();
+    assert.equal(signal.aborted, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('exposeToWebmcp reports unavailable when no modelContext', async () => {
+  const exposure = await exposeToWebmcp(fakeProvider, [toolDef('a')]);
+  assert.equal(exposure.available, false);
+  assert.equal(exposure.count, 0);
+});
+
+test('exposeToWebmcp skips a failing registerTool but counts the rest', async () => {
+  globalThis.document = { modelContext: { async registerTool(t) { if (t.name === 'bad') throw new Error('dup'); } } };
+  try {
+    const exposure = await exposeToWebmcp(fakeProvider, [toolDef('ok'), toolDef('bad'), toolDef('ok2')]);
+    assert.equal(exposure.count, 2);
+  } finally {
+    delete globalThis.document;
+  }
+});

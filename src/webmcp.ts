@@ -195,3 +195,59 @@ export function buildExecute(
     }
   };
 }
+
+/** Map one ACT ToolDefinition to a WebMCP descriptor (execute included). */
+export function toDescriptor(
+  provider: ToolProvider,
+  def: ToolDefinition,
+  options: ExposeWebmcpOptions,
+): WebmcpToolDescriptor {
+  return {
+    name: sanitizeName(def.name),
+    description: resolveLocalizedString(def.description),
+    inputSchema: parseInputSchema(def.parametersSchema),
+    annotations: buildAnnotations(def.metadata),
+    execute: buildExecute(provider, def, options),
+  };
+}
+
+/** Handle returned by {@link exposeToWebmcp}. */
+export interface WebmcpExposure {
+  /** Number of tools successfully registered (0 when unavailable). */
+  count: number;
+  /** False when no native WebMCP surface was present. */
+  available: boolean;
+  /** Unregister all tools (aborts the registration signal). Idempotent. */
+  dispose(): void;
+}
+
+/**
+ * Register every tool of an ACT component on the native WebMCP surface.
+ * Opt-in and headless — the caller decides when to call it and renders any UI.
+ * No-ops (returns `available:false`) where `document.modelContext` is absent.
+ * Call `dispose()` before re-exposing a different component.
+ */
+export async function exposeToWebmcp(
+  provider: ToolProvider,
+  tools: ToolDefinition[],
+  options: ExposeWebmcpOptions = {},
+): Promise<WebmcpExposure> {
+  const mc = getModelContext();
+  if (!mc) return { count: 0, available: false, dispose() {} };
+
+  const controller = new AbortController();
+  let count = 0;
+  for (const def of tools) {
+    const descriptor = toDescriptor(provider, def, options);
+    try {
+      await mc.registerTool(descriptor, {
+        signal: controller.signal,
+        ...(options.exposedTo ? { exposedTo: options.exposedTo } : {}),
+      });
+      count++;
+    } catch (err) {
+      console.warn(`[webmcp] registerTool("${descriptor.name}") failed:`, err);
+    }
+  }
+  return { count, available: true, dispose: () => controller.abort() };
+}
