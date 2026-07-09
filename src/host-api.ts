@@ -14,6 +14,7 @@ import { ConsentGate } from './policy/consent.js';
 import { DecisionCache } from './policy/cache.js';
 import { makeAuditor } from './policy/audit.js';
 import { __setActivePolicy } from './shims/wasi-http.js';
+import { __setSocketsPolicy } from './shims/sockets.js';
 
 /**
  * Typed mirror of the `act:tools/tool-provider@0.2.0` interface as exposed
@@ -162,10 +163,12 @@ export async function runComponent(
   // callers must invoke when done with the component (or before running a
   // different component in the same realm).
   __setActivePolicy(engine);
+  __setSocketsPolicy(engine);
 
   const disposeEngine = (): void => {
     engine.dispose();
     __setActivePolicy(null);
+    __setSocketsPolicy(null);
   };
 
   const { url: entryBlobUrl, revoke: revokeBlobUrls } = await transpileToBlobUrl(bytes, options);

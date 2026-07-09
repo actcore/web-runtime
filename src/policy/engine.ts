@@ -81,6 +81,21 @@ export class PolicyEngine {
     this.#k.free();
   }
 
+  /**
+   * Audits a `wasi:sockets` denial. Sockets are a hard deny in the browser
+   * runtime (no local shim exists) — this does not consult the kernel or
+   * consent, it only records the denial so it's visible in the audit trail.
+   * Does not touch the wasm kernel, so it's safe to call after `dispose()`.
+   */
+  noteSocketsDenied(): void {
+    this.#d.audit({
+      ts: Date.now(), componentRef: this.#d.componentRef, digest: this.#d.digest,
+      capId: 'wasi:sockets',
+      op: { capId: 'wasi:sockets', key: '', action: '', attrs: null },
+      decision: 'deny', actor: 'policy', reason: 'unavailable-in-browser', transport: 'builtin',
+    });
+  }
+
   #emit(op: ResourceOp, decision: 'allow' | 'deny', actor: AuditRecord['actor'], reason?: string): void {
     this.#d.audit({
       ts: Date.now(), componentRef: this.#d.componentRef, digest: this.#d.digest,

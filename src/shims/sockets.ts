@@ -44,7 +44,19 @@
  * `instanceof` against.
  */
 
+export interface SocketsPolicyPort {
+  noteSocketsDenied(): void;
+}
+
+let socketsPolicy: SocketsPolicyPort | null = null;
+
+export function __setSocketsPolicy(p: SocketsPolicyPort | null): void {
+  socketsPolicy = p;
+}
+
 function denyAccess(): never {
+  // Route through the engine for audit, then deny exactly as before.
+  socketsPolicy?.noteSocketsDenied();
   throw 'access-denied';
 }
 
