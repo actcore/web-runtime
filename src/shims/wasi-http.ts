@@ -455,12 +455,24 @@ export const client = {
     // Policy gate. Build the ResourceOp the native host builds, ask the engine,
     // and deny by throwing a raw WIT error-code (never `new Error`).
     if (activePolicy) {
-      const port = authority.includes(':')
-        ? authority.slice(authority.lastIndexOf(':') + 1)
-        : scheme === 'https' ? '443' : '80';
-      const host = authority.includes(':')
-        ? authority.slice(0, authority.lastIndexOf(':'))
-        : authority;
+      let host: string;
+      let port: string;
+      const defaultPort = scheme === 'https' ? '443' : '80';
+      if (authority.startsWith('[')) {
+        // IPv6 literal: host is '[...]' (brackets kept, matching native
+        // uri.host()); an explicit port follows the closing bracket as
+        // ':port'.
+        const close = authority.indexOf(']');
+        host = authority.slice(0, close + 1);
+        const rest = authority.slice(close + 1);
+        port = rest.startsWith(':') ? rest.slice(1) : defaultPort;
+      } else if (authority.includes(':')) {
+        host = authority.slice(0, authority.lastIndexOf(':'));
+        port = authority.slice(authority.lastIndexOf(':') + 1);
+      } else {
+        host = authority;
+        port = defaultPort;
+      }
       const decision = await activePolicy.decideHttp({
         capId: 'wasi:http',
         key: `${host}:${port}`,
