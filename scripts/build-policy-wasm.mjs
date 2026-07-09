@@ -1,5 +1,11 @@
-// Builds act-policy-wasm and vendors the glue + base64-inlined bytes into
-// src/policy/wasm/. Run from web-runtime/. Requires wasm-pack on PATH.
+// MANUAL regen step — only run this when the Rust act-policy kernel changes.
+// Requires wasm-pack on PATH plus the wasm32-unknown-unknown target. Builds
+// act-policy-wasm and vendors the glue + base64-inlined bytes into
+// src/policy/wasm/, committing fresh source inputs for the default build.
+// The default `npm run build` does NOT invoke this script — it uses the
+// already-committed vendored files under src/policy/wasm/ and copies the
+// glue into dist/ via scripts/copy-wasm-glue.mjs (toolchain-free). Run from
+// web-runtime/.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
