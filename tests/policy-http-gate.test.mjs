@@ -67,6 +67,23 @@ test('deny blocks the fetch (fetch never invoked) and throws a WIT error-code', 
   }
 });
 
+test('a rejecting policy port becomes a raw WIT error, never a bare Error (fetch never invoked)', async () => {
+  const realFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async (...args) => { fetchCalls++; return realFetch(...args); };
+  __setActivePolicy({ async decideHttp() { throw new Error('boom'); } });
+  try {
+    await assert.rejects(() => client.send(get('https://blocked.example.com/x')), (e) => {
+      assert.equal(e && e.tag, 'internal-error'); // raw WIT error, not the bare Error thrown by the port
+      return true;
+    });
+    assert.equal(fetchCalls, 0, 'fetch must not be called when the policy port rejects');
+  } finally {
+    __setActivePolicy(null);
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('IPv6 authority without a port yields host with brackets + default port', async () => {
   const agent = new MockAgent();
   agent.disableNetConnect();

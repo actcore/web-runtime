@@ -18,7 +18,10 @@ export class ConsentGate {
   async decide(ask: ConsentAsk): Promise<Verdict> {
     if (!this.#handler) return DENY;
     try {
-      return await this.#handler(ask);
+      const v = await this.#handler(ask);
+      return v && typeof v === 'object' && typeof (v as { allow?: unknown }).allow === 'boolean'
+        ? (v as Verdict)
+        : DENY;
     } catch {
       return DENY;
     }

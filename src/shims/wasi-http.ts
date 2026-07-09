@@ -473,12 +473,17 @@ export const client = {
         host = authority;
         port = defaultPort;
       }
-      const decision = await activePolicy.decideHttp({
-        capId: 'wasi:http',
-        key: `${host}:${port}`,
-        action: method,
-        attrs: { scheme },
-      });
+      let decision: 'allow' | 'deny';
+      try {
+        decision = await activePolicy.decideHttp({
+          capId: 'wasi:http',
+          key: `${host}:${port}`,
+          action: method,
+          attrs: { scheme },
+        });
+      } catch {
+        throw internalError(`wasi:http policy error: ${host}:${port}`);
+      }
       if (decision === 'deny') {
         throw internalError(`wasi:http denied by policy: ${host}:${port}`);
       }

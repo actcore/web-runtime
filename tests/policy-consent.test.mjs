@@ -21,3 +21,15 @@ test('gate degrades to deny when the handler throws', async () => {
   const v = await gate.decide(ask);
   assert.equal(v.allow, false);
 });
+
+test('gate degrades to deny when the handler resolves undefined', async () => {
+  const gate = new ConsentGate(async () => undefined);
+  const v = await gate.decide(ask);
+  assert.equal(v.allow, false);
+});
+
+test('gate degrades to deny when the handler resolves a shape without allow', async () => {
+  const gate = new ConsentGate(async () => ({}));
+  const v = await gate.decide(ask);
+  assert.equal(v.allow, false);
+});
