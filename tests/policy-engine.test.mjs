@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEngine } from '../dist/policy/engine.js';
+import { buildEngine, PolicyEngine } from '../dist/policy/engine.js';
 import { ConsentGate } from '../dist/policy/consent.js';
 import { DecisionCache } from '../dist/policy/cache.js';
 import { makeAuditor } from '../dist/policy/audit.js';
@@ -42,4 +42,42 @@ test('ask policy with no handler → deny', async () => {
   const { dep } = deps(JSON.stringify({ default: 'ask' }), undefined);
   const engine = await buildEngine(dep);
   assert.equal(await engine.decideHttp(op), 'deny');
+});
+
+test('dispose() is idempotent', async () => {
+  const { dep } = deps(JSON.stringify({ default: 'deny' }));
+  const engine = await buildEngine(dep);
+  assert.doesNotThrow(() => {
+    engine.dispose();
+    engine.dispose();
+  });
+});
+
+test('decideHttp fails closed when kernel classify() throws', async () => {
+  const fakeHandle = {
+    classify() {
+      throw new Error('boom');
+    },
+    ceilingSummary: () => '{}',
+    free() {},
+  };
+  const dep = {
+    componentRef: 'r',
+    digest: 'd',
+    declaredCapsJson: '{}',
+    policyJson: '{}',
+    consent: new ConsentGate(undefined),
+    cache: new DecisionCache('s', 'none'),
+    audit: makeAuditor(() => {}),
+  };
+  const engine = new PolicyEngine(fakeHandle, dep);
+  await assert.doesNotReject(async () => {
+    const result = await engine.decideHttp({
+      capId: 'wasi:http',
+      key: 'h:443',
+      action: 'GET',
+      attrs: { scheme: 'https' },
+    });
+    assert.equal(result, 'deny');
+  });
 });

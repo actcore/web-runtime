@@ -184,8 +184,13 @@ export async function runComponent(
   } catch (e) {
     // Instantiation failed — no ComponentInstance will be returned for the
     // caller to dispose(), so release the policy engine + slot here instead
-    // of leaking them.
-    disposeEngine();
+    // of leaking them. If cleanup itself throws, don't let it mask the
+    // original instantiation error.
+    try {
+      disposeEngine();
+    } catch {
+      /* preserve original error */
+    }
     throw e;
   } finally {
     // The module has fetched + compiled its (~100MB) core wasm by now; free the
@@ -198,7 +203,11 @@ export async function runComponent(
   );
 
   if (!mod.toolProvider) {
-    disposeEngine();
+    try {
+      disposeEngine();
+    } catch {
+      /* preserve original error */
+    }
     throw new Error(
       'Component does not export act:tools/tool-provider@0.2.0',
     );

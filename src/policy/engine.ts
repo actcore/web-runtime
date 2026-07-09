@@ -25,6 +25,7 @@ export async function buildEngine(deps: EngineDeps): Promise<PolicyEngine> {
 export class PolicyEngine {
   #k: KernelHandle;
   #d: EngineDeps;
+  #disposed = false;
   constructor(handle: KernelHandle, deps: EngineDeps) {
     this.#k = handle;
     this.#d = deps;
@@ -41,7 +42,15 @@ export class PolicyEngine {
       this.#emit(op, cached, 'user', 'remembered');
       return cached;
     }
-    const decision = this.#k.classify(JSON.stringify(op));
+    let decision: 'allow' | 'deny' | 'ask';
+    try {
+      decision = this.#k.classify(JSON.stringify(op));
+    } catch {
+      // Fail closed: a kernel error must not propagate a non-WIT Error through
+      // the http shim. Audit and deny.
+      this.#emit(op, 'deny', 'policy', 'classify-error');
+      return 'deny';
+    }
     if (decision === 'allow' || decision === 'deny') {
       this.#emit(op, decision, 'policy');
       return decision;
@@ -67,6 +76,8 @@ export class PolicyEngine {
    * `ComponentInstance.dispose` in host-api.ts).
    */
   dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
     this.#k.free();
   }
 
