@@ -7,6 +7,8 @@ export interface KernelHandle {
   /** opJson: a ResourceOp `{ capId, key, action, attrs }`. */
   classify(opJson: string): Decision;
   ceilingSummary(): string;
+  /** Frees the underlying wasm `PolicyKernel` instance's linear memory. */
+  free(): void;
 }
 
 let ready: Promise<void> | undefined;
@@ -29,6 +31,7 @@ export class Kernel {
     return {
       classify: (opJson: string) => k.classify(opJson) as Decision,
       ceilingSummary: () => k.ceilingSummary(),
+      free: () => k.free(),
     };
   }
 }

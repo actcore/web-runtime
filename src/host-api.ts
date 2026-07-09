@@ -3,10 +3,17 @@ import type {
   ToolResult,
 } from './generated/interfaces/act-tools-tool-provider.js';
 import type { Cbor, Metadata } from './generated/interfaces/act-core-types.js';
+import type { AuditRecord, ConsentAsk, PolicyConfig, Verdict } from './policy/types.js';
 
 import { transpileToBlobUrl } from './transpile.js';
 import { fmtDuration, measurePhase } from './timing.js';
 import { installCompileStreamingFallback } from './streaming-fallback.js';
+import { decodeDeclaredCaps } from './policy/decode.js';
+import { buildEngine } from './policy/engine.js';
+import { ConsentGate } from './policy/consent.js';
+import { DecisionCache } from './policy/cache.js';
+import { makeAuditor } from './policy/audit.js';
+import { __setActivePolicy } from './shims/wasi-http.js';
 
 /**
  * Typed mirror of the `act:tools/tool-provider@0.2.0` interface as exposed
@@ -33,6 +40,21 @@ export interface ComponentInstance {
   toolProvider: ToolProvider;
   /** `act:sessions/session-provider@0.2.0` if the component exports it. */
   sessionProvider?: SessionProvider;
+  /**
+   * Releases the policy engine governing this component: frees the wasm
+   * kernel instance and clears the module-level `wasi:http` policy slot.
+   * Present only when a policy engine was installed (always, as of this
+   * version). Call when the caller is done with the component.
+   *
+   * v1 limitation: the `wasi:http` shim holds the active policy in a single
+   * module-level slot, so only ONE governed component may run per page realm
+   * at a time — `dispose()` must be called before `runComponent` is invoked
+   * again for a different component in the same realm, or the new
+   * component's policy will silently replace this one's (guest tool calls
+   * made through the stale slot after that point would be misattributed).
+   * Per-run isolation is deferred to a future version.
+   */
+  dispose?: () => void;
 }
 
 export interface RunComponentOptions {
@@ -73,6 +95,17 @@ export interface RunComponentOptions {
    * the cache silently disables itself there. See {@link clearTranspileCache}.
    */
   cache?: boolean;
+  /** Operator baseline policy. Omitted ⇒ `{ default: "ask" }`. */
+  policy?: PolicyConfig;
+  /** Consent handler for `ask` decisions. Omitted ⇒ ask degrades to deny. */
+  requestConsent?: (ask: ConsentAsk) => Promise<Verdict>;
+  /** Structured audit sink. Defaults to console.debug. */
+  onAudit?: (r: AuditRecord) => void;
+  /** Where `remember: "always"` persists. Default "local". */
+  persist?: 'local' | 'session' | 'none';
+  /** Component ref + content digest for audit + remember-scoping. */
+  componentRef?: string;
+  digest?: string;
 }
 
 /**
@@ -100,6 +133,41 @@ export async function runComponent(
 
   installCompileStreamingFallback();
 
+  // ── Policy engine ──────────────────────────────────────────────────────
+  // Built and installed BEFORE transpile/instantiation: some components make
+  // wasi:http calls during top-level module evaluation, not only from later
+  // tool calls, so the `wasi:http` shim's policy slot must already be set by
+  // the time the component's module is imported below.
+  const declared = await decodeDeclaredCaps(bytes);
+  const ref = options.componentRef ?? options.name ?? 'component';
+  const digest = options.digest ?? '';
+  const engine = await buildEngine({
+    componentRef: ref,
+    digest,
+    declaredCapsJson: JSON.stringify(declared),
+    policyJson: JSON.stringify(options.policy ?? { default: 'ask' }),
+    consent: new ConsentGate(options.requestConsent),
+    cache: new DecisionCache(
+      `${globalThis.location?.origin ?? 'null'}|${ref}|${digest}`,
+      options.persist ?? 'local',
+    ),
+    audit: makeAuditor(options.onAudit),
+  });
+  // v1 limitation: the `wasi:http` shim holds the active policy in a single
+  // module-level slot, so only ONE governed component may run per page realm
+  // at a time. Guest tool calls happen AFTER instantiation (via `callTool`),
+  // so — unlike the transpile blob URLs below — the slot must stay installed
+  // for the component's whole lifetime, not just through this function. It
+  // is released by `dispose()` on the returned `ComponentInstance`, which
+  // callers must invoke when done with the component (or before running a
+  // different component in the same realm).
+  __setActivePolicy(engine);
+
+  const disposeEngine = (): void => {
+    engine.dispose();
+    __setActivePolicy(null);
+  };
+
   const { url: entryBlobUrl, revoke: revokeBlobUrls } = await transpileToBlobUrl(bytes, options);
 
   // Dynamic import from a blob: URL compiles + instantiates the component's core
@@ -113,6 +181,12 @@ export async function runComponent(
       toolProvider?: ToolProvider;
       sessionProvider?: SessionProvider;
     };
+  } catch (e) {
+    // Instantiation failed — no ComponentInstance will be returned for the
+    // caller to dispose(), so release the policy engine + slot here instead
+    // of leaking them.
+    disposeEngine();
+    throw e;
   } finally {
     // The module has fetched + compiled its (~100MB) core wasm by now; free the
     // blob URLs so they don't accumulate (leak ~100MB) across runs.
@@ -124,6 +198,7 @@ export async function runComponent(
   );
 
   if (!mod.toolProvider) {
+    disposeEngine();
     throw new Error(
       'Component does not export act:tools/tool-provider@0.2.0',
     );
@@ -131,6 +206,10 @@ export async function runComponent(
 
   // sessionProvider is present only on session-provider components; pass it
   // through so callers can open sessions (stateful components need it).
-  return { toolProvider: mod.toolProvider, sessionProvider: mod.sessionProvider };
+  return {
+    toolProvider: mod.toolProvider,
+    sessionProvider: mod.sessionProvider,
+    dispose: disposeEngine,
+  };
 }
 

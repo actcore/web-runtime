@@ -58,3 +58,5 @@ export type {
   ExposeWebmcpOptions,
   WebmcpExposure,
 } from './webmcp.js';
+
+export type { PolicyConfig, ConsentAsk, Verdict, AuditRecord, ResourceOp } from './policy/types.js';
