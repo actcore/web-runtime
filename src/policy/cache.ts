@@ -38,6 +38,7 @@ function openDb(): Promise<IDBDatabase> {
  */
 export class DecisionCache {
   #mem: Remembered = {};
+  #durable: Remembered = {};
   #scopeKey: string;
   #persist: 'local' | 'session' | 'none';
 
@@ -52,10 +53,18 @@ export class DecisionCache {
 
   put(opKey: string, verdict: Verdict): void {
     if (verdict.remember === 'once') return;
-    this.#mem[opKey] = verdict.allow ? 'allow' : 'deny';
+    const d: 'allow' | 'deny' = verdict.allow ? 'allow' : 'deny';
+    this.#mem[opKey] = d;
     if (verdict.remember === 'always' && this.#persist === 'local') {
+      this.#durable[opKey] = d;
       void this.#persistAll();
     }
+  }
+
+  /** Pure: given the currently-stored record, compute the record to write back.
+   *  Read-modify-write — preserves prior persisted entries, excludes session-scoped ones. */
+  persistPayload(stored: Remembered): Remembered {
+    return { ...stored, ...this.#durable };
   }
 
   async loadPersisted(): Promise<void> {
@@ -85,7 +94,12 @@ export class DecisionCache {
       try {
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put({ ...this.#mem }, this.#scopeKey);
+          const store = tx.objectStore(STORE);
+          const r = store.get(this.#scopeKey);
+          r.onsuccess = () => {
+            const stored = (r.result as Remembered | undefined) ?? {};
+            store.put(this.persistPayload(stored), this.#scopeKey);
+          };
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error ?? new Error('cache put failed'));
           tx.onabort = () => reject(tx.error ?? new Error('cache put aborted'));
