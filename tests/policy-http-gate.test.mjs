@@ -67,6 +67,47 @@ test('deny blocks the fetch (fetch never invoked) and throws a WIT error-code', 
   }
 });
 
+test('a policy deny suspends on a real task before rejecting (guest async-import safety)', async () => {
+  // Regression for the in-browser python-env hang: `_pip.install(<out-of-ceiling
+  // URL>)` reaches an out-of-ceiling host → the engine returns 'deny' WITHOUT any
+  // network round-trip, so `client.send` would otherwise reject within a
+  // microtask. An `[async-lower]` wasi:http import that settles without ever
+  // suspending trips the guest async runtime / jco async driver under JSPI: the
+  // guest task waits on a subtask that never completes → hang. (A consent-
+  // suspended deny, which waits on the prompt, surfaces correctly — the only
+  // difference is that it crosses a real task boundary.) The shim must therefore
+  // suspend on a genuine event-loop task before rejecting a deny.
+  const realFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async (...args) => { fetchCalls++; return realFetch(...args); };
+  // decideHttp resolves synchronously (in a microtask) — exactly the timing of
+  // an out-of-ceiling deny in the real engine.
+  __setActivePolicy({ async decideHttp() { return 'deny'; } });
+  try {
+    const p = client.send(get('https://blocked.example.com/x'));
+    let outcome = null;
+    p.then(() => { outcome = 'resolved'; }, (e) => { outcome = (e && e.tag) || 'error'; });
+    // Drain the microtask queue aggressively. `await Promise.resolve()` never
+    // advances a `setTimeout` macrotask, so if the deny settled purely in
+    // microtasks (the bug) `outcome` is set here; if it correctly waits for a
+    // real task boundary (the fix) it is still pending.
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+    assert.equal(
+      outcome,
+      null,
+      'deny must not settle within microtasks — it must cross a real event-loop task, ' +
+        'or a guest async runtime waiting on the async wasi:http import can hang',
+    );
+    // Let the macrotask run: it must reject with the raw WIT error-code, and
+    // fetch must never have been invoked.
+    await assert.rejects(p, (e) => e && e.tag === 'internal-error');
+    assert.equal(fetchCalls, 0, 'fetch must not be called when policy denies');
+  } finally {
+    __setActivePolicy(null);
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('a rejecting policy port becomes a raw WIT error, never a bare Error (fetch never invoked)', async () => {
   const realFetch = globalThis.fetch;
   let fetchCalls = 0;

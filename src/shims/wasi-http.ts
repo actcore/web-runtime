@@ -66,6 +66,20 @@ type Trailers = Fields;
 
 const TEXT_DECODER = new TextDecoder();
 
+/**
+ * Resolve after a macrotask (a real event-loop task), so an `await` on this
+ * genuinely SUSPENDS the caller rather than merely draining a microtask.
+ * `client.send` uses it before rejecting on a policy denial: an async
+ * wasi:http import that settles without ever suspending trips guest async
+ * runtimes / the jco async driver under JSPI (see the deny path in
+ * `client.send`). `setTimeout` is present in every realm the shim runs in
+ * (browser window, Web Worker, Node) — the same global surface the shim
+ * already relies on for `fetch`.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function decodeFieldValue(v: FieldValue): string {
   // FieldValue is Uint8Array per WIT, but be lenient if a string slips in.
   return typeof v === 'string' ? (v as string) : TEXT_DECODER.decode(v);
@@ -499,9 +513,25 @@ export const client = {
           attrs: { scheme },
         });
       } catch {
+        await yieldToEventLoop();
         throw internalError(`wasi:http policy error: ${host}:${port}`);
       }
       if (decision === 'deny') {
+        // A policy DENY (e.g. an out-of-ceiling host) resolves without any
+        // network round-trip, so `send` would otherwise reject within a
+        // microtask — this async wasi:http import never suspends on a real
+        // event-loop task. A guest async runtime / the jco async driver under
+        // JSPI can mishandle an `[async-lower]` import that settles (especially
+        // rejects) WITHOUT ever suspending, leaving the guest waiting on a
+        // subtask that never completes. Observed in-browser: python-env's
+        // `_pip.install(<out-of-ceiling URL>)` hangs forever on the deny, while
+        // an allow→fetch (real suspension) and a consent-suspended deny (waits
+        // on the prompt) both surface the error correctly. Yield once so the
+        // import suspends on a genuine task boundary — matching the working
+        // consent-deny timing — before it rejects. Contract unchanged: still
+        // throws `internalError('wasi:http denied by policy: <host>:<port>')`,
+        // and the deny is already audited (decision:'deny') by the engine.
+        await yieldToEventLoop();
         throw internalError(`wasi:http denied by policy: ${host}:${port}`);
       }
     }
